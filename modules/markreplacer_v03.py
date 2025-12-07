@@ -155,4 +155,3 @@ class MarkerReplacer:
             return False, f"標記資料庫格式錯誤: {db_path}"
         except Exception as e:
             return False, f"處理過程發生錯誤: {str(e)}"
-

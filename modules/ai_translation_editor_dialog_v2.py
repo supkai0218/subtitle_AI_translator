@@ -14,6 +14,15 @@ from .ai_validator_v1 import TranslationValidator
 from .prompt_manager import PromptManager
 import time
 
+def get_settings_filepath():
+    """獲取settings.json檔案路徑"""
+    from pathlib import Path
+    import os
+    base_path = Path(os.getcwd())
+    settings_dir = base_path / "../settings"
+    settings_dir.mkdir(parents=True, exist_ok=True)
+    return settings_dir / "settings.json"
+
 class AITranslationWorker(QThread):
     """AI翻譯工作執行緒 - 使用v1b翻譯器 + v0驗證器"""
     progress_updated = pyqtSignal(str)
@@ -657,7 +666,8 @@ class AITranslationEditorDialog(QDialog):
         """重置Prompt為原始設定"""
         try:
             # 重新載入settings.json的原始設定
-            with open("json/settings.json", "r", encoding="utf-8") as f:
+            settings_file_path = get_settings_filepath()
+            with open(settings_file_path, "r", encoding="utf-8") as f:
                 settings_data = json.load(f)
 
             original_prompts = settings_data.get("ai_translation", {}).get("prompts", {})
@@ -841,7 +851,7 @@ class AITranslationEditorDialog(QDialog):
             return
 
         try:
-            with open("json/AI_prompt.json", "r", encoding="utf-8") as f:
+            with open("../settings/AI_prompt.json", "r", encoding="utf-8") as f:
                 ai_prompt_data = json.load(f)
 
             if template_name in ai_prompt_data:
@@ -857,7 +867,7 @@ class AITranslationEditorDialog(QDialog):
     def load_ai_settings(self):
         """載入AI設定"""
         try:
-            with open("json/AI_prompt.json", "r", encoding="utf-8") as f:
+            with open("../settings/AI_prompt.json", "r", encoding="utf-8") as f:
                 ai_prompt_data = json.load(f)
 
             # 載入API設定
@@ -890,7 +900,7 @@ class AITranslationEditorDialog(QDialog):
 
             # 同步API設定
             if current_api:
-                with open("json/AI_prompt.json", "r", encoding="utf-8") as f:
+                with open("../settings/AI_prompt.json", "r", encoding="utf-8") as f:
                     ai_prompt_data = json.load(f)
                 api_data = ai_prompt_data.get("default", {}).get("api_settings", {}).get(current_api, {})
                 self.ai_config.update({
@@ -901,7 +911,7 @@ class AITranslationEditorDialog(QDialog):
 
             # 同步模型設定
             if current_model:
-                with open("json/AI_prompt.json", "r", encoding="utf-8") as f:
+                with open("../settings/AI_prompt.json", "r", encoding="utf-8") as f:
                     ai_prompt_data = json.load(f)
                 model_data = ai_prompt_data.get("default", {}).get("model_settings", {}).get(current_model, {})
                 self.ai_config["model"] = model_data.get("model", "")
@@ -927,7 +937,7 @@ class AITranslationEditorDialog(QDialog):
     def save_ai_settings(self):
         """儲存AI設定"""
         try:
-            with open("json/AI_prompt.json", "r", encoding="utf-8") as f:
+            with open("../settings/AI_prompt.json", "r", encoding="utf-8") as f:
                 ai_prompt_data = json.load(f)
 
             current_api = self.api_settings_combo.currentText()
@@ -954,7 +964,7 @@ class AITranslationEditorDialog(QDialog):
                 "retry_delay": self.retry_delay_spinbox.value()
             })
 
-            with open("json/AI_prompt.json", "w", encoding="utf-8") as f:
+            with open("../settings/AI_prompt.json", "w", encoding="utf-8") as f:
                 json.dump(ai_prompt_data, f, ensure_ascii=False, indent=4)
 
             # 同步設定到記憶體並重新初始化翻譯器
@@ -982,7 +992,7 @@ class AITranslationEditorDialog(QDialog):
             return
 
         try:
-            with open("json/AI_prompt.json", "r", encoding="utf-8") as f:
+            with open("../settings/AI_prompt.json", "r", encoding="utf-8") as f:
                 ai_prompt_data = json.load(f)
 
             api_data = ai_prompt_data.get("default", {}).get("api_settings", {}).get(current_api, {})
@@ -1004,7 +1014,7 @@ class AITranslationEditorDialog(QDialog):
             return
 
         try:
-            with open("json/AI_prompt.json", "r", encoding="utf-8") as f:
+            with open("../settings/AI_prompt.json", "r", encoding="utf-8") as f:
                 ai_prompt_data = json.load(f)
 
             model_data = ai_prompt_data.get("default", {}).get("model_settings", {}).get(current_model, {})
@@ -1021,7 +1031,7 @@ class AITranslationEditorDialog(QDialog):
         name, ok = QInputDialog.getText(self, "新增API設定", "輸入API設定名稱:")
         if ok and name.strip():
             try:
-                with open("json/AI_prompt.json", "r", encoding="utf-8") as f:
+                with open("../settings/AI_prompt.json", "r", encoding="utf-8") as f:
                     ai_prompt_data = json.load(f)
 
                 if "default" not in ai_prompt_data:
@@ -1036,7 +1046,7 @@ class AITranslationEditorDialog(QDialog):
                     "key": ""
                 }
 
-                with open("json/AI_prompt.json", "w", encoding="utf-8") as f:
+                with open("../settings/AI_prompt.json", "w", encoding="utf-8") as f:
                     json.dump(ai_prompt_data, f, ensure_ascii=False, indent=4)
 
                 self.load_ai_settings()
@@ -1061,13 +1071,13 @@ class AITranslationEditorDialog(QDialog):
 
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                with open("json/AI_prompt.json", "r", encoding="utf-8") as f:
+                with open("../settings/AI_prompt.json", "r", encoding="utf-8") as f:
                     ai_prompt_data = json.load(f)
 
                 if current_api in ai_prompt_data.get("default", {}).get("api_settings", {}):
                     del ai_prompt_data["default"]["api_settings"][current_api]
 
-                    with open("json/AI_prompt.json", "w", encoding="utf-8") as f:
+                    with open("../settings/AI_prompt.json", "w", encoding="utf-8") as f:
                         json.dump(ai_prompt_data, f, ensure_ascii=False, indent=4)
 
                     self.load_ai_settings()
@@ -1080,7 +1090,7 @@ class AITranslationEditorDialog(QDialog):
         name, ok = QInputDialog.getText(self, "新增模型設定", "輸入模型設定名稱:")
         if ok and name.strip():
             try:
-                with open("json/AI_prompt.json", "r", encoding="utf-8") as f:
+                with open("../settings/AI_prompt.json", "r", encoding="utf-8") as f:
                     ai_prompt_data = json.load(f)
 
                 if "default" not in ai_prompt_data:
@@ -1093,7 +1103,7 @@ class AITranslationEditorDialog(QDialog):
                     "model": ""
                 }
 
-                with open("json/AI_prompt.json", "w", encoding="utf-8") as f:
+                with open("../settings/AI_prompt.json", "w", encoding="utf-8") as f:
                     json.dump(ai_prompt_data, f, ensure_ascii=False, indent=4)
 
                 self.load_ai_settings()
@@ -1118,13 +1128,13 @@ class AITranslationEditorDialog(QDialog):
 
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                with open("json/AI_prompt.json", "r", encoding="utf-8") as f:
+                with open("../settings/AI_prompt.json", "r", encoding="utf-8") as f:
                     ai_prompt_data = json.load(f)
 
                 if current_model in ai_prompt_data.get("default", {}).get("model_settings", {}):
                     del ai_prompt_data["default"]["model_settings"][current_model]
 
-                    with open("json/AI_prompt.json", "w", encoding="utf-8") as f:
+                    with open("../settings/AI_prompt.json", "w", encoding="utf-8") as f:
                         json.dump(ai_prompt_data, f, ensure_ascii=False, indent=4)
 
                     self.load_ai_settings()
@@ -1135,7 +1145,7 @@ class AITranslationEditorDialog(QDialog):
     def load_ai_prompt_templates(self):
         """載入AI Prompt模板"""
         try:
-            with open("json/AI_prompt.json", "r", encoding="utf-8") as f:
+            with open("../settings/AI_prompt.json", "r", encoding="utf-8") as f:
                 ai_prompt_data = json.load(f)
 
             self.template_combo.clear()
@@ -1161,7 +1171,7 @@ class AITranslationEditorDialog(QDialog):
         name, ok = QInputDialog.getText(self, "新增模板", "輸入模板名稱:")
         if ok and name.strip():
             try:
-                with open("json/AI_prompt.json", "r", encoding="utf-8") as f:
+                with open("../settings/AI_prompt.json", "r", encoding="utf-8") as f:
                     ai_prompt_data = json.load(f)
 
                 # 複製default設定作為新模板
@@ -1175,7 +1185,7 @@ class AITranslationEditorDialog(QDialog):
                     "translation_config": {}
                 }).copy()
 
-                with open("json/AI_prompt.json", "w", encoding="utf-8") as f:
+                with open("../settings/AI_prompt.json", "w", encoding="utf-8") as f:
                     json.dump(ai_prompt_data, f, ensure_ascii=False, indent=4)
 
                 self.load_ai_prompt_templates()
@@ -1200,13 +1210,13 @@ class AITranslationEditorDialog(QDialog):
 
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                with open("json/AI_prompt.json", "r", encoding="utf-8") as f:
+                with open("../settings/AI_prompt.json", "r", encoding="utf-8") as f:
                     ai_prompt_data = json.load(f)
 
                 if current_template in ai_prompt_data:
                     del ai_prompt_data[current_template]
 
-                    with open("json/AI_prompt.json", "w", encoding="utf-8") as f:
+                    with open("../settings/AI_prompt.json", "w", encoding="utf-8") as f:
                         json.dump(ai_prompt_data, f, ensure_ascii=False, indent=4)
 
                     self.load_ai_prompt_templates()
@@ -1223,7 +1233,7 @@ class AITranslationEditorDialog(QDialog):
             return
 
         try:
-            with open("json/AI_prompt.json", "r", encoding="utf-8") as f:
+            with open("../settings/AI_prompt.json", "r", encoding="utf-8") as f:
                 ai_prompt_data = json.load(f)
 
             if current_template not in ai_prompt_data:
@@ -1239,7 +1249,7 @@ class AITranslationEditorDialog(QDialog):
                 "user_prompt_template": self.user_prompt_editor.toPlainText()
             }
 
-            with open("json/AI_prompt.json", "w", encoding="utf-8") as f:
+            with open("../settings/AI_prompt.json", "w", encoding="utf-8") as f:
                 json.dump(ai_prompt_data, f, ensure_ascii=False, indent=4)
 
             QMessageBox.information(self, "成功", f"模板 '{current_template}' 已儲存")

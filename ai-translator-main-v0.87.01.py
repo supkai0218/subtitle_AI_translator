@@ -19,8 +19,8 @@ from modules.capcut_converter import CapcutConverter
 from modules.text_filter_v01 import TextFilter
 from modules.text_marker import SensitiveWordReplacer
 from modules.translation_editor_dialog_v0 import TranslationEditorDialog
-from modules.markreplacer_v02 import MarkerReplacer
-from modules.srt_merger_v0 import SRTMerger
+from modules.markreplacer_v03 import MarkerReplacer
+from modules.srt_merger_v01 import SRTMerger
 from modules.srt_separator_v0 import SrtSeparator
 
 # --- AI翻譯相關模組匯入 ---

@@ -1,19 +1,22 @@
 import json
 import re
+import os
 from pathlib import Path
 from typing import Dict, List, Set, Tuple, Optional, Callable
 
 class TextFilter:
-    """文字過濾器類別 - 快速執行版本"""
+    """文字過濾器類別 - 快速執行版本 v0.3"""
     
-    def __init__(self, progress_callback: Optional[Callable[[int, str], None]] = None):
+    def __init__(self, progress_callback: Optional[Callable[[int, str], None]] = None, settings_paths: Optional[dict] = None):
         """
         初始化文字過濾器
         
         Args:
             progress_callback: 進度回調函數，接收進度百分比和狀態訊息
+            settings_paths: 從settings.json讀取的路徑配置
         """
         self.progress_callback = progress_callback
+        self.settings_paths = settings_paths
         self.patterns = self._load_patterns()
 
     def report_progress(self, percentage: int, message: str):
@@ -24,8 +27,12 @@ class TextFilter:
     def _load_patterns(self) -> Dict[str, List[str]]:
         """載入過濾規則"""
         try:
-            # 修改為使用主程式目錄下的固定路徑
-            filter_db_path = Path('json/filter_patterns.json')
+            # 使用設定路徑或預設路徑
+            if self.settings_paths and 'json' in self.settings_paths:
+                filter_db_path = Path(self.settings_paths['json']) / 'filter_patterns.json'
+            else:
+                # 預設路徑：主程式目錄 / json / filter_patterns.json
+                filter_db_path = Path(os.getcwd()) / 'json' / 'filter_patterns.json'
             
             # 確保json目錄存在
             filter_db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -48,7 +55,11 @@ class TextFilter:
             }
             
             # 寫入預設規則到指定位置
-            filter_db_path = Path('json/filter_patterns.json')
+            if self.settings_paths and 'json' in self.settings_paths:
+                filter_db_path = Path(self.settings_paths['json']) / 'filter_patterns.json'
+            else:
+                filter_db_path = Path(os.getcwd()) / 'json' / 'filter_patterns.json'
+            
             filter_db_path.parent.mkdir(parents=True, exist_ok=True)
             
             with open(filter_db_path, 'w', encoding='utf-8') as f:
@@ -116,8 +127,13 @@ class TextFilter:
 
             self.report_progress(60, "準備輸出...")
 
-            # 建立輸出目錄
-            output_dir = input_path.parent.parent / '1B'
+            # 使用設定檔的路徑或預設路徑
+            if self.settings_paths and 'txt_1B' in self.settings_paths:
+                output_dir = Path(self.settings_paths['txt_1B'])
+            else:
+                # 預設路徑：主程式目錄 / txt / 1B
+                output_dir = Path(os.getcwd()) / 'txt' / '1B'
+            
             output_dir.mkdir(parents=True, exist_ok=True)
 
             # 準備輸出檔案
