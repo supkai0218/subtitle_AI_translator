@@ -4,13 +4,18 @@ import os
 from pathlib import Path
 from typing import Dict, List, Set, Tuple, Optional, Callable
 
+
 class TextFilter:
     """文字過濾器類別 - 快速執行版本 v0.3"""
-    
-    def __init__(self, progress_callback: Optional[Callable[[int, str], None]] = None, settings_paths: Optional[dict] = None):
+
+    def __init__(
+        self,
+        progress_callback: Optional[Callable[[int, str], None]] = None,
+        settings_paths: Optional[dict] = None
+    ):
         """
         初始化文字過濾器
-        
+
         Args:
             progress_callback: 進度回調函數，接收進度百分比和狀態訊息
             settings_paths: 從settings.json讀取的路徑配置
@@ -24,23 +29,29 @@ class TextFilter:
         if self.progress_callback:
             self.progress_callback(percentage, message)
 
+    def _get_filter_db_path(self) -> Path:
+        """依設定檔解析 1B 過濾資料庫路徑"""
+        base_dir = Path(os.getcwd())
+        if self.settings_paths:
+            custom_path = self.settings_paths.get('filter_patterns_db')
+            if custom_path:
+                path = Path(custom_path)
+                if not path.is_absolute():
+                    path = base_dir / path
+                return path
+        return base_dir / 'json' / 'filter_patterns.json'
+
     def _load_patterns(self) -> Dict[str, List[str]]:
         """載入過濾規則"""
+        filter_db_path = self._get_filter_db_path()
         try:
-            # 使用設定路徑或預設路徑
-            if self.settings_paths and 'json' in self.settings_paths:
-                filter_db_path = Path(self.settings_paths['json']) / 'filter_patterns.json'
-            else:
-                # 預設路徑：主程式目錄 / json / filter_patterns.json
-                filter_db_path = Path(os.getcwd()) / 'json' / 'filter_patterns.json'
-            
-            # 確保json目錄存在
+            # 確保資料夾存在
             filter_db_path.parent.mkdir(parents=True, exist_ok=True)
-            
+
             # 讀取規則檔案
             with open(filter_db_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
-                
+
         except FileNotFoundError:
             # 如果檔案不存在，建立預設規則到指定位置
             default_patterns = {
@@ -53,30 +64,24 @@ class TextFilter:
                     r'^[おぉオォ]+$'
                 ]
             }
-            
-            # 寫入預設規則到指定位置
-            if self.settings_paths and 'json' in self.settings_paths:
-                filter_db_path = Path(self.settings_paths['json']) / 'filter_patterns.json'
-            else:
-                filter_db_path = Path(os.getcwd()) / 'json' / 'filter_patterns.json'
-            
+
             filter_db_path.parent.mkdir(parents=True, exist_ok=True)
-            
+
             with open(filter_db_path, 'w', encoding='utf-8') as f:
                 json.dump(default_patterns, f, ensure_ascii=False, indent=2)
             return default_patterns
-            
+
         except json.JSONDecodeError:
             raise ValueError(f"規則資料庫檔案格式錯誤: {filter_db_path}")
 
     def process_file(self, input_file: str, filename: str) -> Tuple[bool, str]:
         """
         處理文字檔案並輸出過濾後的結果
-        
+
         Args:
             input_file: 輸入文字檔案的完整路徑
             filename: 輸出檔案的基本名稱（不含副檔名）
-            
+
         Returns:
             (success, message): 處理是否成功及相關訊息
         """
@@ -109,7 +114,7 @@ class TextFilter:
             self.report_progress(40, "執行過濾...")
 
             # 找出需要過濾的行
-            filtered_lines = set()
+            filtered_lines: Set[int] = set()
             for i, line in enumerate(lines):
                 parts = line.strip().split(':', 1)
                 if len(parts) != 2:
@@ -130,26 +135,28 @@ class TextFilter:
             # 使用設定檔的路徑或預設路徑
             if self.settings_paths and 'txt_1B' in self.settings_paths:
                 output_dir = Path(self.settings_paths['txt_1B'])
+                if not output_dir.is_absolute():
+                    output_dir = Path(os.getcwd()) / output_dir
             else:
                 # 預設路徑：主程式目錄 / txt / 1B
                 output_dir = Path(os.getcwd()) / 'txt' / '1B'
-            
+
             output_dir.mkdir(parents=True, exist_ok=True)
 
             # 準備輸出檔案
-            filtered_lines_list = []
-            filtered_timecodes_list = []
+            filtered_lines_list: List[str] = []
+            filtered_timecodes_list: List[str] = []
             new_line_number = 1
 
             for i, (line, timecode) in enumerate(zip(lines, timecodes)):
                 if i not in filtered_lines:
                     line_parts = line.strip().split(':', 1)
                     timecode_parts = timecode.strip().split(':', 1)
-                    
+
                     if len(line_parts) == 2 and len(timecode_parts) == 2:
                         text = line_parts[1].strip()
                         time = timecode_parts[1].strip()
-                        
+
                         filtered_lines_list.append(f"{new_line_number}:{text}\n")
                         filtered_timecodes_list.append(f"{new_line_number}:{time}\n")
                         new_line_number += 1

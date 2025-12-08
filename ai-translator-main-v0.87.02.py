@@ -1,4 +1,4 @@
-#V0.87.01 AI翻譯並行處理與驗證機制 AI翻譯優化測試版
+#V0.87.02 AI翻譯並行處理與驗證機制 AI翻譯優化測試版
 import sys
 import os
 import json
@@ -21,7 +21,7 @@ from modules.text_marker import SensitiveWordReplacer
 from modules.translation_editor_dialog_v0 import TranslationEditorDialog
 from modules.markreplacer_v03 import MarkerReplacer
 from modules.srt_merger_v01 import SRTMerger
-from modules.srt_separator_v0 import SrtSeparator
+from modules.srt_separator import SrtSeparator
 
 # --- AI翻譯相關模組匯入 ---
 from modules.ai_translator_v1b import AITranslator
@@ -502,7 +502,13 @@ class ProcessWorker(QThread):
             success, msg = converter.process_file(self.input_file, self.output_filename, self.settings)
         else:
             separator = SrtSeparator()
-            success, msg = separator.convert(str(self.base_path / self.settings["txt_1A"]), self.output_filename)
+            default_srt_path = Path(os.getcwd()) / "srt" / "in" / f"{self.output_filename}.srt"
+            self.log(f"[偵錯] 1A SRT 模式 input_file={self.input_file}, output_filename={self.output_filename}, convert預設路徑={default_srt_path}")
+            success, msg = separator.convert(
+                str(self.base_path / self.settings["txt_1A"]),
+                self.output_filename,
+                input_srt_path=self.input_file
+            )
         if not success: raise Exception(f"1A 階段失敗: {msg}")
         self.log(f"1A: 拆解完成。")
 
@@ -849,23 +855,46 @@ class MainWindow(QMainWindow):
                 return
 
             try:
+                copy_needed = True
+                assigned_input_path = None
                 if self.mode_capcut.isChecked():
                     dest_dir = Path(os.getcwd()) / self.settings["paths"]["json_capcut"]
                     dest_path = dest_dir / f"{self.output_filename}.json"
                 else:
                     dest_dir = Path(os.getcwd()) / self.settings["paths"]["srt_input"]
                     dest_path = dest_dir / f"{self.output_filename}.srt"
+                    
+                    source_path = Path(file_name)
+                    try:
+                        resolved_source = source_path.resolve()
+                        resolved_dest = dest_path.resolve()
+                    except Exception:
+                        resolved_source = source_path
+                        resolved_dest = dest_path
+                    if resolved_source == resolved_dest:
+                        copy_needed = False
+                        assigned_input_path = str(resolved_source)
+                        self.log_message(f"[資訊] SRT 來源已位於輸入資料夾，略過複製: {resolved_source}")
+                    else:
+                        self.log_message(f"[偵錯] 1A 將來源檔案複製到輸出路徑: {resolved_source} -> {resolved_dest}")
                 
                 dest_dir.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(file_name, dest_path)
+                if copy_needed:
+                    shutil.copy2(file_name, dest_path)
+                    assigned_input_path = str(dest_path)
+                    self.log_message(f"檔案已複製到: {dest_path}")
+                else:
+                    self.log_message(f"[資訊] 使用既有檔案：{assigned_input_path}")
+
+                if assigned_input_path is None:
+                    assigned_input_path = str(dest_path)
                 
                 self.file_label.setText(f"來源檔案: {dest_path}")
                 self.output_label.setText(f"輸出檔名: {self.output_filename}")
-                self.worker.input_file = str(dest_path)
+                self.worker.input_file = assigned_input_path
                 self.worker.output_filename = self.output_filename
                 
                 self.log_message(f"已選擇檔案: {file_name}")
-                self.log_message(f"檔案已複製到: {dest_path}")
             except Exception as e:
                 self.show_error(f"準備檔案時發生錯誤：{e}")
 
