@@ -1,4 +1,4 @@
-#V0.87.02 AI翻譯並行處理與驗證機制 AI翻譯優化測試版
+#V0.87.03 market replacer debug path fix
 import sys
 import os
 import json
@@ -19,7 +19,7 @@ from modules.capcut_converter import CapcutConverter
 from modules.text_filter_v01 import TextFilter
 from modules.text_marker import SensitiveWordReplacer
 from modules.translation_editor_dialog_v0 import TranslationEditorDialog
-from modules.markreplacer_v03 import MarkerReplacer
+from modules.markreplacer import MarkerReplacer
 from modules.srt_merger_v01 import SRTMerger
 from modules.srt_separator import SrtSeparator
 
@@ -561,7 +561,14 @@ class ProcessWorker(QThread):
         
     def run_3A_replace_markers(self):
         self.progress_updated.emit(80, "執行 3A: 標記文字還原...")
-        replacer = MarkerReplacer()
+        markers_path = self.settings.get('markers_db')
+        txt_2b_path = self.settings.get('txt_2B')
+        txt_3a_path = self.settings.get('txt_3A')
+        self.log(f"[偵錯] 3A 設定快照 markers_db={markers_path}, txt_2B={txt_2b_path}, txt_3A={txt_3a_path}, cwd={Path.cwd()}")
+        replacer = MarkerReplacer(
+            progress_callback=lambda pct, msg: self.progress_updated.emit(pct, msg),
+            settings_paths=self.settings
+        )
         # 傳遞 input_stage='2B'，因為 3A 的來源固定是 2B
         success, msg = replacer.process_file(self.output_filename, input_stage='2B')
         if not success: raise Exception(f"3A 階段失敗: {msg}")
@@ -690,7 +697,7 @@ class FilenameDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("字幕AI翻譯系統 v0.87.01")
+        self.setWindowTitle("字幕AI翻譯系統 v0.87.03")
         self.resize(700, 750)
         self.output_filename = None
         self.settings = load_settings()

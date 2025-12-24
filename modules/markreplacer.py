@@ -1,3 +1,5 @@
+#v04 標記文字取代器 改進版，修正路徑處理
+
 import json
 import random
 import re
@@ -18,6 +20,16 @@ class MarkerReplacer:
         self.progress_callback = progress_callback
         self.settings_paths = settings_paths
         self.db = {}
+
+    def debug_log(self, message: str):
+        """統一的偵錯輸出，若無回呼則退回 print"""
+        if self.progress_callback:
+            try:
+                self.progress_callback(-1, f"[MarkReplacer偵錯] {message}")
+            except Exception:
+                print(f"[MarkReplacer偵錯] {message}")
+        else:
+            print(f"[MarkReplacer偵錯] {message}")
 
     def report_progress(self, percentage: int, message: str):
         """回報進度"""
@@ -87,34 +99,46 @@ class MarkerReplacer:
             # --- 關鍵修正：動態設定檔案路徑 ---
             # 使用設定路徑或預設路徑
             base_path = Path.cwd()
+            settings_repr = self.settings_paths if self.settings_paths else 'None'
+            self.debug_log(f"process_file() 收到 settings_paths={settings_repr}")
             
             if self.settings_paths and 'markers_db' in self.settings_paths:
                 db_path = Path(self.settings_paths['markers_db'])
+                self.debug_log(f"markers_db 使用 settings 路徑: {db_path}")
             else:
                 # 預設路徑：主程式目錄 / json / markers_db.json
                 db_path = base_path / 'json' / 'markers_db.json'
+                self.debug_log(f"markers_db 回退到預設路徑: {db_path}")
             
             # 根據傳入的 input_stage 動態決定來源路徑
             if self.settings_paths and f'txt_{input_stage}' in self.settings_paths:
                 input_dir = Path(self.settings_paths[f'txt_{input_stage}'])
+                self.debug_log(f"輸入資料夾使用 settings 路徑: {input_dir}")
             else:
                 # 預設路徑：主程式目錄 / txt / {stage}
                 input_dir = base_path / 'txt' / input_stage
+                self.debug_log(f"輸入資料夾回退到預設路徑: {input_dir}")
             
             input_path = input_dir / f'{input_stage}-txt_{filename}.txt'
+            self.debug_log(f"完整輸入檔案路徑: {input_path}")
             
             if self.settings_paths and 'txt_3A' in self.settings_paths:
                 output_dir = Path(self.settings_paths['txt_3A'])
+                self.debug_log(f"輸出資料夾使用 settings 路徑: {output_dir}")
             else:
                 # 預設路徑：主程式目錄 / txt / 3A
                 output_dir = base_path / 'txt' / '3A'
+                self.debug_log(f"輸出資料夾回退到預設路徑: {output_dir}")
             
             output_file = output_dir / f'3A-txt_{filename}.txt'
+            self.debug_log(f"完整輸出檔案路徑: {output_file}")
 
             # 驗證輸入
             if not db_path.exists():
+                self.debug_log(f"markers_db 不存在: {db_path}")
                 return False, f"找不到標記資料庫: {db_path}"
             if not input_path.exists():
+                self.debug_log(f"輸入檔案不存在: {input_path}")
                 return False, f"找不到輸入檔案: {input_path}"
 
             # 載入標記資料庫
