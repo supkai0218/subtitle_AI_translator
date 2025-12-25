@@ -1,3 +1,5 @@
+#V0.87.04 AI翻譯編輯器於主介面可編輯設定
+
 import sys
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
     QLabel, QTextEdit, QSplitter, QGroupBox, QProgressBar, QMessageBox,
@@ -185,8 +187,9 @@ class TranslationProgressWindow(QDialog):
 class AITranslationEditorDialog(QDialog):
     """AI翻譯編輯器對話框 v2.0 - 可編輯設定版本"""
     
-    def __init__(self, source_file: str, target_file: str, ai_config: Dict, parent=None):
+    def __init__(self, source_file: Optional[str], target_file: Optional[str], ai_config: Dict, parent=None, mode: str = "translation"):
         super().__init__(parent)
+        self.mode = mode if mode in {"translation", "settings"} else "translation"
         self.source_file = source_file
         self.target_file = target_file
         self.ai_config = ai_config.copy()  # 使用傳入的設定，不修改原始設定
@@ -212,6 +215,7 @@ class AITranslationEditorDialog(QDialog):
 
         self.init_ui()
         self.load_source_content()
+        self.configure_mode_ui()
 
         # 初始化AI翻譯器（此流程預設啟用）
         try:
@@ -250,9 +254,9 @@ class AITranslationEditorDialog(QDialog):
         
         self.auto_translate_btn = QPushButton("AI自動翻譯")
         self.auto_translate_btn.clicked.connect(self.start_auto_translation)
-        
+
         self.save_btn = QPushButton("儲存翻譯")
-        self.save_btn.clicked.connect(self.save_translation)
+        self.save_btn.clicked.connect(self.handle_save_action)
         
         self.cancel_btn = QPushButton("取消")
         self.cancel_btn.clicked.connect(self.reject)
@@ -279,8 +283,12 @@ class AITranslationEditorDialog(QDialog):
 
         # 檔案資訊
         info_layout = QHBoxLayout()
-        info_layout.addWidget(QLabel(f"來源檔案: {Path(self.source_file).name}"))
-        info_layout.addWidget(QLabel(f"目標檔案: {Path(self.target_file).name}"))
+        source_text = f"來源檔案: {Path(self.source_file).name}" if self.source_file else "來源檔案: 尚未指定"
+        target_text = f"目標檔案: {Path(self.target_file).name}" if self.target_file else "目標檔案: 尚未指定"
+        self.source_info_label = QLabel(source_text)
+        self.target_info_label = QLabel(target_text)
+        info_layout.addWidget(self.source_info_label)
+        info_layout.addWidget(self.target_info_label)
         layout.addLayout(info_layout)
 
         # 分割視窗
@@ -326,6 +334,41 @@ class AITranslationEditorDialog(QDialog):
         stats_layout.addWidget(self.char_count_label)
         stats_layout.addStretch()
         layout.addLayout(stats_layout)
+
+    def configure_mode_ui(self):
+        """依照模式切換 UI 狀態"""
+        source_exists = bool(self.source_file and Path(self.source_file).exists())
+        target_exists = bool(self.target_file)
+        translation_enabled = self.mode == "translation" and source_exists and target_exists
+
+        if self.source_info_label:
+            if self.source_file:
+                suffix = "" if source_exists else " (未找到檔案)"
+                self.source_info_label.setText(f"來源檔案: {Path(self.source_file).name}{suffix}")
+            else:
+                self.source_info_label.setText("來源檔案: 尚未指定")
+
+        if self.target_info_label:
+            if self.target_file:
+                self.target_info_label.setText(f"目標檔案: {Path(self.target_file).name}")
+            else:
+                self.target_info_label.setText("目標檔案: 尚未指定")
+
+        for widget in [self.clear_translation_btn, self.reload_btn, self.auto_translate_btn]:
+            widget.setEnabled(translation_enabled)
+
+        self.translation_text.setReadOnly(not translation_enabled)
+        if hasattr(self.translation_text, "setPlaceholderText"):
+            placeholder = "" if translation_enabled else "設定模式：需在流程中載入字幕後才能進行翻譯。"
+            self.translation_text.setPlaceholderText(placeholder)
+
+        if translation_enabled:
+            self.save_btn.setText("儲存翻譯")
+            if self.status_label.text().startswith("設定模式"):
+                self.status_label.setText("就緒")
+        else:
+            self.save_btn.setText("完成")
+            self.status_label.setText("設定模式：可直接調整 AI 設定與 Prompt")
 
     def setup_settings_info_tab(self, tab):
         """設定資訊分頁 - 多組AI設定管理"""
@@ -622,6 +665,19 @@ class AITranslationEditorDialog(QDialog):
 
     def load_source_content(self):
         """載入來源檔案內容"""
+        if not self.source_file or not Path(self.source_file).exists():
+            placeholder = "設定模式：目前沒有載入字幕內容。" if self.mode == "settings" else "找不到來源檔案，請確認 2C 流程輸入。"
+            self.original_text.setPlainText(placeholder)
+            self.original_lines = []
+            self.line_count_label.setText("行數: 0")
+            self.char_count_label.setText("字元數: 0")
+            if self.mode == "settings":
+                self.status_label.setText("設定模式：可直接調整 AI 設定與 Prompt")
+            else:
+                self.status_label.setText("警告：找不到來源檔案")
+            self.configure_mode_ui()
+            return
+
         try:
             with open(self.source_file, "r", encoding="utf-8") as f:
                 content = f.read()
@@ -637,6 +693,8 @@ class AITranslationEditorDialog(QDialog):
 
         except Exception as e:
             QMessageBox.critical(self, "錯誤", f"載入來源檔案失敗: {str(e)}")
+        finally:
+            self.configure_mode_ui()
 
     def apply_prompt_changes(self):
         """套用Prompt調整到臨時設定"""
@@ -722,6 +780,10 @@ class AITranslationEditorDialog(QDialog):
 
     def start_auto_translation(self):
         """開始自動翻譯"""
+        if self.mode != "translation":
+            QMessageBox.information(self, "提示", "設定模式下無法執行自動翻譯。")
+            return
+
         if not self.ai_config.get("enabled", False):
             QMessageBox.warning(self, "警告", "AI翻譯未啟用")
             return
@@ -791,10 +853,27 @@ class AITranslationEditorDialog(QDialog):
         """清空翻譯"""
         self.translation_text.clear()
         self.translated_lines = []
-        self.status_label.setText("翻譯已清空")
+        if self.mode == "translation":
+            self.status_label.setText("翻譯已清空")
+        else:
+            self.status_label.setText("設定模式：翻譯區內容已清空")
+
+    def handle_save_action(self):
+        if self.mode == "translation":
+            self.save_translation()
+        else:
+            self.accept()
 
     def save_translation(self):
         """儲存翻譯結果"""
+        if self.mode != "translation":
+            self.accept()
+            return
+
+        if not self.target_file:
+            QMessageBox.warning(self, "警告", "目標檔案未設定，無法儲存翻譯")
+            return
+
         try:
             # 取得翻譯內容
             translation_content = self.translation_text.toPlainText()

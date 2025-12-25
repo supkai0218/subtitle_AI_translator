@@ -1,4 +1,4 @@
-#V0.87.03 market replacer debug path fix
+#V0.87.04 AI設定可在主畫面開啟
 import sys
 import os
 import json
@@ -27,7 +27,7 @@ from modules.srt_separator import SrtSeparator
 from modules.ai_translator_v1b import AITranslator
 from modules.ai_validator_v1 import TranslationValidator
 from modules.prompt_manager import PromptManager
-from modules.ai_translation_editor_dialog_v2 import AITranslationEditorDialog
+from modules.ai_translation_editor_dialog import AITranslationEditorDialog
 
 # ----------------- 流程定義 -----------------
 FLOWS = {
@@ -697,7 +697,7 @@ class FilenameDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("字幕AI翻譯系統 v0.87.03")
+        self.setWindowTitle("字幕AI翻譯系統 v0.87.04")
         self.resize(700, 750)
         self.output_filename = None
         self.settings = load_settings()
@@ -763,12 +763,15 @@ class MainWindow(QMainWindow):
         btn_1b = QPushButton("1B 過濾文字管理")
         btn_2a = QPushButton("2A prompt管理")
         btn_2b = QPushButton("2B 標記資料庫管理")
+        self.ai_settings_dialog_btn = QPushButton("AI 翻譯設定 / Prompt")
         btn_1b.clicked.connect(self.run_manual_1B_filter)
         btn_2a.clicked.connect(self.run_manual_2A)
         btn_2b.clicked.connect(self.run_manual_2B)
+        self.ai_settings_dialog_btn.clicked.connect(self.open_ai_settings_dialog)
         manual_tools_layout.addWidget(btn_1b)
         manual_tools_layout.addWidget(btn_2a)
         manual_tools_layout.addWidget(btn_2b)
+        manual_tools_layout.addWidget(self.ai_settings_dialog_btn)
         layout.addWidget(manual_tools_group)
 
         run_group = QGroupBox("步驟 3: 執行與狀態")
@@ -942,6 +945,23 @@ class MainWindow(QMainWindow):
         self.manual_worker.error.connect(lambda msg: self.show_error(f"2B 錯誤: {msg}"))
         self.manual_worker.start()
 
+    def open_ai_settings_dialog(self):
+        ai_config = self.settings.get("ai_translation", {}).copy()
+        dialog = AITranslationEditorDialog(
+            source_file=None,
+            target_file=None,
+            ai_config=ai_config,
+            parent=self,
+            mode="settings"
+        )
+        result = dialog.exec()
+        # 無論使用者是否在對話框中儲存設定，結束後重新載入設定以確保最新資料
+        if result:
+            self.log_message("AI 翻譯設定視窗已關閉並套用變更。")
+        else:
+            self.log_message("AI 翻譯設定視窗已關閉。")
+        self.settings = load_settings()
+
     def process_completed(self):
         self.run_btn.setEnabled(True)
         self.file_btn.setEnabled(True)
@@ -966,7 +986,13 @@ class MainWindow(QMainWindow):
 
         if use_ai_translation:
             # 使用新的AI翻譯編輯器對話框（帶獨立進度窗口）
-            dialog = AITranslationEditorDialog(source_file, target_file, ai_config, self)
+            dialog = AITranslationEditorDialog(
+                source_file=source_file,
+                target_file=target_file,
+                ai_config=ai_config,
+                parent=self,
+                mode="translation"
+            )
             if dialog.exec():
                 self.log_message("2C: 翻譯結果輸入完成，流程將繼續執行。")
                 self.worker.resume_process()
