@@ -9,11 +9,13 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PyQt6.QtCore import Qt
 from pathlib import Path
 
+from modules.settings_path import resolve_settings_asset
+
 class MarkersDBManager(QMainWindow):
     def __init__(self):
         super().__init__()
         # 修改資料庫和備份路徑
-        self.db_file = Path('../settings/markers_db.json')
+        self.db_file = resolve_settings_asset('markers_db.json')
         self.backup_dir = Path('../backup/bak_markers')
         self.has_unsaved_changes = False
         self.current_data = None

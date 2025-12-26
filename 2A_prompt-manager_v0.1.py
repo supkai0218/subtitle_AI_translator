@@ -6,6 +6,8 @@ from pathlib import Path
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
     QHBoxLayout, QLabel, QTextEdit, QPushButton, QTableWidget, QTableWidgetItem, 
     QMessageBox, QDialog, QComboBox, QDialogButtonBox, QLineEdit)
+
+from modules.settings_path import resolve_settings_asset
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QClipboard
 
@@ -72,7 +74,7 @@ class PromptVersionDialog(QDialog):
 class PromptManager(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.db_file = '../settings/prompt.json'
+        self.db_file = str(resolve_settings_asset('prompt.json'))
         self.has_unsaved_changes = False
         self.current_prompt = None
         self.editing_mode = False

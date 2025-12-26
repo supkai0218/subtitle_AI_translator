@@ -1,10 +1,11 @@
-#V0.87.04 AI設定可在主畫面開啟
+#V0.87.05 設定集中管理
 import sys
 import os
 import json
 import shutil
 import glob
 import subprocess
+import copy
 from datetime import datetime
 from pathlib import Path
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
@@ -22,6 +23,13 @@ from modules.translation_editor_dialog_v0 import TranslationEditorDialog
 from modules.markreplacer import MarkerReplacer
 from modules.srt_merger_v01 import SRTMerger
 from modules.srt_separator import SrtSeparator
+from modules.settings_path import (
+    resolve_settings_file,
+    resolve_settings_file_from_data,
+    make_portable_path,
+    clear_settings_cache,
+    update_bootstrap_pointer,
+)
 
 # --- AI翻譯相關模組匯入 ---
 from modules.ai_translator_v1b import AITranslator
@@ -79,7 +87,7 @@ DEFAULT_SETTINGS = {
         "filter_patterns_db": "json/filter_patterns.json",
         "srt_input": "srt/in",
         "capcut_drafts_dir": "",
-        "settings_file": "../settings/settings.json"
+        "settings_file": "settings/settings.json"
     },
     "ai_translation": {
         "api_provider": "openrouter",
@@ -101,10 +109,7 @@ DEFAULT_SETTINGS = {
 }
 
 def get_settings_filepath():
-    base_path = Path(os.getcwd())
-    settings_dir = base_path / "../settings"
-    settings_dir.mkdir(parents=True, exist_ok=True)
-    return settings_dir / "settings.json"
+    return resolve_settings_file()
 
 def load_settings():
     settings_file = get_settings_filepath()
@@ -112,6 +117,9 @@ def load_settings():
         try:
             with open(settings_file, "r", encoding="utf-8") as f:
                 settings = json.load(f)
+            settings.setdefault("paths", {})
+            settings["paths"]["settings_file"] = make_portable_path(settings_file)
+            update_bootstrap_pointer(settings_file)
 
             # 移除舊的prompt鍵以確保向後相容
             if "ai_translation" in settings and "prompts" in settings["ai_translation"]:
@@ -148,14 +156,20 @@ def load_settings():
 
             return settings
         except Exception:
-            return DEFAULT_SETTINGS.copy()
-    return DEFAULT_SETTINGS.copy()
+            pass
+    default_settings = copy.deepcopy(DEFAULT_SETTINGS)
+    default_settings.setdefault("paths", {})
+    default_settings["paths"]["settings_file"] = make_portable_path(settings_file)
+    update_bootstrap_pointer(settings_file)
+    return default_settings
 
 def save_settings(settings):
-    settings_file = get_settings_filepath()
+    target_path = resolve_settings_file_from_data(settings)
     try:
-        with open(settings_file, "w", encoding="utf-8") as f:
+        with open(target_path, "w", encoding="utf-8") as f:
             json.dump(settings, f, indent=4, ensure_ascii=False)
+        update_bootstrap_pointer(target_path)
+        clear_settings_cache()
     except Exception as e:
         print(f"儲存設定檔失敗：{e}")
 

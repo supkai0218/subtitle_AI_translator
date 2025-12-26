@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
 
+from modules.settings_path import resolve_settings_asset
+
 class FilterPatternsEditor:
     def __init__(self, root):
         self.root = root
@@ -13,8 +15,8 @@ class FilterPatternsEditor:
         self.root.geometry("800x600")
         
         # 初始化變數
-        self.default_db_path = Path('../settings/filter_patterns.json')
-        self.backup_dir = Path('../settings/bak_filters')
+        self.default_db_path = resolve_settings_asset('filter_patterns.json')
+        self.backup_dir = resolve_settings_asset('bak_filters')
         self.patterns = self._load_patterns()
         self.has_unsaved_changes = False
         
