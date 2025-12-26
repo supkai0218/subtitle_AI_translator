@@ -1,12 +1,30 @@
+#V0.87.06 支援Prompt_manager模板資料庫路徑設定
+
 import json
 from typing import Dict, List, Optional
 from pathlib import Path
 
+try:
+    from .settings_path import resolve_settings_file
+except ImportError:  # pragma: no cover - 兼容直接執行模組
+    try:
+        from modules.settings_path import resolve_settings_file  # type: ignore
+    except ImportError:  # pragma: no cover - 若無法匯入則保持 None
+        resolve_settings_file = None  # type: ignore
+
 class PromptManager:
     """Prompt模板管理器"""
     
-    def __init__(self, settings_path: Optional[str] = None):
-        self.settings_path = settings_path or "json/prompt_templates.json"
+    def __init__(self, settings_paths: Optional[Dict] = None):
+        self.settings_paths = dict(settings_paths) if settings_paths else {}
+        self.settings_path = self._resolve_prompt_templates_path()
+        # 將回填後的路徑寫回，以便後續程式取得實際使用位置
+        if "prompt_templates_db" not in self.settings_paths:
+            self.settings_paths["prompt_templates_db"] = str(self.settings_path)
+        self._debug_log("init", {
+            "settings_keys": list(self.settings_paths.keys()),
+            "selected_path": str(self.settings_path)
+        })
         self.system_templates = {}
         self.user_templates = {}
         self.load_templates()
@@ -15,6 +33,10 @@ class PromptManager:
         """從設定檔載入模板"""
         try:
             settings_file = Path(self.settings_path)
+            self._debug_log("load_templates:start", {
+                "resolved_path": str(settings_file.resolve()),
+                "exists": settings_file.exists()
+            })
             if settings_file.exists():
                 with open(settings_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
@@ -32,6 +54,10 @@ class PromptManager:
         try:
             settings_file = Path(self.settings_path)
             settings_file.parent.mkdir(parents=True, exist_ok=True)
+            self._debug_log("save_templates:start", {
+                "resolved_path": str(settings_file.resolve()),
+                "parent_exists": settings_file.parent.exists()
+            })
             
             data = {
                 "system_templates": self.system_templates,
@@ -234,6 +260,55 @@ class PromptManager:
 
 請按照原文的編號順序回傳高品質的翻譯結果。"""
         }
+
+    def _debug_log(self, phase: str, payload: Optional[Dict] = None):
+        try:
+            info = payload or {}
+            info_str = ", ".join(f"{k}={v}" for k, v in info.items()) if info else ""
+            print(f"[PromptManager][DEBUG] phase={phase}{' ' + info_str if info_str else ''}")
+        except Exception:
+            pass
+
+    def _resolve_prompt_templates_path(self) -> Path:
+        """決定Prompt模板資料庫實際路徑，並確保為絕對路徑"""
+        # 1. 優先使用呼叫端提供的設定
+        candidate = self.settings_paths.get("prompt_templates_db") if self.settings_paths else None
+        if candidate:
+            return self._normalize_path(candidate)
+
+        # 2. 從設定檔讀取 paths.prompt_templates_db（若有）
+        settings_path = self._load_path_from_settings_file()
+        if settings_path:
+            return settings_path
+
+        # 3. 回退到專案內建預設路徑
+        return self._normalize_path("json/prompt_templates.json")
+
+    def _load_path_from_settings_file(self) -> Optional[Path]:
+        if resolve_settings_file is None:
+            return None
+        try:
+            settings_file = resolve_settings_file()
+            with open(settings_file, "r", encoding="utf-8") as f:
+                settings_data = json.load(f)
+            candidate = settings_data.get("paths", {}).get("prompt_templates_db")
+            if candidate:
+                resolved = self._normalize_path(candidate)
+                self._debug_log("resolve_from_settings", {
+                    "settings_file": str(settings_file),
+                    "resolved_path": str(resolved)
+                })
+                return resolved
+        except Exception as e:  # pragma: no cover - 設定檔缺失時僅記錄
+            self._debug_log("resolve_from_settings:error", {"error": str(e)})
+        return None
+
+    def _normalize_path(self, value: str | Path) -> Path:
+        path = Path(value)
+        if not path.is_absolute():
+            project_root = Path(__file__).resolve().parent.parent
+            path = (project_root / path).resolve()
+        return path
     
     def export_templates(self, file_path: str) -> bool:
         """匯出模板到檔案"""

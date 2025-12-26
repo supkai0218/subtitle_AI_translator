@@ -1,4 +1,6 @@
-#V0.87.05 設定集中管理
+
+#V0.87.06 支援Prompt_manager模板資料庫路徑設定
+
 import sys
 import os
 import json
@@ -85,6 +87,7 @@ DEFAULT_SETTINGS = {
         "script_2B": "2B_markers-manager_*.py", "srt_output": ".",
         "script_1B_filter": "1B_filter_patterns_editor_*.py",
         "filter_patterns_db": "json/filter_patterns.json",
+        "prompt_templates_db": "json/prompt_templates.json",
         "srt_input": "srt/in",
         "capcut_drafts_dir": "",
         "settings_file": "settings/settings.json"
@@ -223,7 +226,7 @@ class SettingsDialog(QDialog):
         form_layout = QFormLayout()
         
         dir_keys = ["capcut_drafts_dir", "txt_1A", "txt_1B", "txt_1C", "txt_2B", "txt_3A", "ai", "json_capcut", "json_bak_markers", "srt_input", "srt_output"]
-        file_keys = ["markers_db", "script_2A", "script_2B", "script_1B_filter", "filter_patterns_db", "settings_file"]
+        file_keys = ["markers_db", "script_2A", "script_2B", "script_1B_filter", "filter_patterns_db", "prompt_templates_db", "settings_file"]
         
         key_descriptions = {
             "capcut_drafts_dir": "CapCut專案預設開啟目錄:",
@@ -235,6 +238,7 @@ class SettingsDialog(QDialog):
             "markers_db": "標記資料庫檔案:", "script_2A": "2A prompt管理腳本:",
             "script_2B": "2B 標記管理腳本:", "script_1B_filter": "1B 過濾管理腳本:",
             "filter_patterns_db": "1B 過濾文字資料庫檔案:",
+            "prompt_templates_db": "Prompt 模板資料庫檔案:",
             "settings_file": "系統設定檔案位置:"
         }
 
@@ -711,7 +715,7 @@ class FilenameDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("字幕AI翻譯系統 v0.87.04")
+        self.setWindowTitle("字幕AI翻譯系統 v0.87.06")
         self.resize(700, 750)
         self.output_filename = None
         self.settings = load_settings()
@@ -966,7 +970,8 @@ class MainWindow(QMainWindow):
             target_file=None,
             ai_config=ai_config,
             parent=self,
-            mode="settings"
+            mode="settings",
+            settings_paths=self.settings.get("paths", {})
         )
         result = dialog.exec()
         # 無論使用者是否在對話框中儲存設定，結束後重新載入設定以確保最新資料
@@ -1005,7 +1010,8 @@ class MainWindow(QMainWindow):
                 target_file=target_file,
                 ai_config=ai_config,
                 parent=self,
-                mode="translation"
+                mode="translation",
+                settings_paths=self.settings.get("paths", {})
             )
             if dialog.exec():
                 self.log_message("2C: 翻譯結果輸入完成，流程將繼續執行。")

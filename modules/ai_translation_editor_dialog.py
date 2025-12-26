@@ -1,3 +1,5 @@
+
+#V0.87.06 支援Prompt_manager模板資料庫路徑設定
 #V0.87.04 AI翻譯編輯器於主介面可編輯設定
 
 import sys
@@ -182,18 +184,29 @@ class TranslationProgressWindow(QDialog):
 class AITranslationEditorDialog(QDialog):
     """AI翻譯編輯器對話框 v2.0 - 可編輯設定版本"""
     
-    def __init__(self, source_file: Optional[str], target_file: Optional[str], ai_config: Dict, parent=None, mode: str = "translation"):
+    def __init__(
+        self,
+        source_file: Optional[str],
+        target_file: Optional[str],
+        ai_config: Dict,
+        parent=None,
+        mode: str = "translation",
+        settings_paths: Optional[Dict] = None
+    ):
         super().__init__(parent)
         self.mode = mode if mode in {"translation", "settings"} else "translation"
         self.source_file = source_file
         self.target_file = target_file
         self.ai_config = ai_config.copy()  # 使用傳入的設定，不修改原始設定
+        self.settings_paths = dict(settings_paths) if settings_paths else {}
+        if self.settings_paths:
+            self.ai_config["paths"] = self.settings_paths
         # 強制設定AI翻譯為啟用狀態，因為此流程預設執行AI翻譯
         self.ai_config["enabled"] = True
         self.original_lines = []
         self.translated_lines = []
         self.ai_translator = None
-        self.prompt_manager = PromptManager()
+        self.prompt_manager = PromptManager(settings_paths=self.ai_config.get("paths", {}))
 
         # 臨時prompt設定（僅用於本次翻譯）
         self.temp_prompts = {
