@@ -1,3 +1,7 @@
 /json/
 /settings/
 /modules/__pycache__/
+/doc/
+*.pyc
+*.pyo
+*.pyd
