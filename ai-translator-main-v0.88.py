@@ -1,5 +1,6 @@
+#v0.88.02 一鍵全自動翻譯驗證功能bug fix
 #v0.88.01 新增一鍵全自動翻譯
-#V0.87.06 支援Prompt_manager模板資料庫路徑設定
+
 
 import sys
 import os
@@ -35,7 +36,7 @@ from modules.settings_path import (
 
 # --- AI翻譯相關模組匯入 ---
 from modules.ai_translator import AITranslator
-from modules.ai_validator_v1 import TranslationValidator
+from modules.ai_validator import TranslationValidator
 from modules.prompt_manager import PromptManager
 from modules.ai_translation_editor_dialog import AITranslationEditorDialog
 
@@ -626,15 +627,31 @@ class ProcessWorker(QThread):
         if not success:
             raise Exception(f"AI 翻譯失敗: {error_msg}")
             
-        # 儲存結果
-        # 注意: 這裡得到的 response 是純文字翻譯結果 (含序號)，需要寫入檔案
-        # 這裡假設 AITranslator 返回的格式是直接可用的，或者我們需要做簡單處理?
-        # 根據 ai_translator.py，它返回的是 combined_response (str)
+        # --- 新增：驗證與清理結果 ---
+        self.log("正在驗證並清理翻譯結果...")
+        validator = TranslationValidator(ai_config)
+        is_valid, repaired_result, validation_msg = validator.validate_response(response, len(lines))
         
-        with open(target_file, 'w', encoding='utf-8') as f:
-            f.write(response)
+        if not is_valid:
+            self.log(f"警告: 翻譯驗證未完全通過: {validation_msg}")
+        
+        # 將 repaired_result (List[str]) 轉換回文字內容
+        # 這裡需要移除 validate_response 返回的 "序號:內容" 中的序號，只保留翻譯文字
+        cleaned_translations = []
+        for line in repaired_result:
+            if ':' in line:
+                _, content = line.split(':', 1)
+                cleaned_translations.append(content.strip())
+            else:
+                cleaned_translations.append(line.strip())
+        
+        combined_cleaned_response = "\n".join(cleaned_translations)
             
-        self.log(f"2C: AI 自動翻譯完成，已寫入 {target_file.name}")
+        # 儲存結果
+        with open(target_file, 'w', encoding='utf-8') as f:
+            f.write(combined_cleaned_response)
+            
+        self.log(f"2C: AI 自動翻譯完成 (與驗證)，已寫入 {target_file.name}")
         
     def run_3A_replace_markers(self):
         self.progress_updated.emit(80, "執行 3A: 標記文字還原...")

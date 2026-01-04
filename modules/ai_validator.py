@@ -1,4 +1,6 @@
+# v0.88.02 加強驗證功能容錯能力
 # AI Validator v1 - 翻譯驗證模組
+
 import logging
 import re
 from typing import List, Dict, Tuple
@@ -84,39 +86,36 @@ class TranslationValidator:
                         translations.append(item.get("translated", ""))
                     return translations
 
-            # 解析編號格式（支援點號和冒號）
+            # 解析編號格式（支援點號和冒號，如 "1. " 或 "1:" 或 "51:"）
             lines = response.strip().split("\n")
             translations = []
+
+            # 正則表達式：匹配行首的 "數字. " 或 "數字:" 格式
+            # 支援如 "1. ", "1:", "51: ", "51. " 等
+            pattern = re.compile(r'^\d+[\.:]\s*')
 
             for line in lines:
                 line = line.strip()
                 if not line:
                     continue
 
-                # 嘗試匹配 "1. " 或 "1:" 格式
-                matched = False
-                for i in range(1, expected_count + 1):
-                    # 嘗試點號格式 "1. "
-                    if line.startswith(f"{i}. "):
-                        translation = line[len(f"{i}. "):].strip()
-                        translations.append(translation)
-                        matched = True
-                        break
-                    # 嘗試冒號格式 "1:"
-                    elif line.startswith(f"{i}:"):
-                        translation = line[len(f"{i}:"):].strip()
-                        translations.append(translation)
-                        matched = True
-                        break
-
-                # 如果行以編號開頭但未匹配，記錄警告
-                if not matched and any(line.startswith(f"{i}") for i in range(1, expected_count + 1)):
-                    self.logger.warning(f"無法解析翻譯行: {line[:50]}")
+                # 使用正則表達式移除行首可能的序號
+                cleaned_line = pattern.sub('', line).strip()
+                
+                # 如果清理後還有內容，則加入列表
+                # 注意：即便清理後為空（可能是 AI 只輸出序號），也加入空字串以維持行數對應（後續會修復）
+                translations.append(cleaned_line)
 
             # 確保返回正確數量的翻譯
+            # 如果解析出的行數過多，可能需要過濾或截斷，但這裡先遵循原始邏輯
+            if len(translations) > expected_count:
+                # 如果行數過多，嘗試移除空行
+                translations = [t for t in translations if t]
+                
+            # 補齊或截斷到預期行數
             while len(translations) < expected_count:
                 translations.append("")
-
+            
             return translations[:expected_count]
 
         except Exception as e:
