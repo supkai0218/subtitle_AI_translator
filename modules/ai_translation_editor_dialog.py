@@ -1,4 +1,4 @@
-
+#V0.88.01 支援一鍵全自動翻譯
 #V0.87.06 支援Prompt_manager模板資料庫路徑設定
 #V0.87.04 AI翻譯編輯器於主介面可編輯設定
 
@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 import json
 
-from .ai_translator_v1b import AITranslator
+from .ai_translator import AITranslator
 from .ai_validator_v1 import TranslationValidator
 from .prompt_manager import PromptManager
 from .settings_path import resolve_settings_file, resolve_settings_asset

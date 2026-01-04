@@ -1,4 +1,4 @@
-
+#v0.88.01 新增一鍵全自動翻譯
 #V0.87.06 支援Prompt_manager模板資料庫路徑設定
 
 import sys
@@ -34,7 +34,7 @@ from modules.settings_path import (
 )
 
 # --- AI翻譯相關模組匯入 ---
-from modules.ai_translator_v1b import AITranslator
+from modules.ai_translator import AITranslator
 from modules.ai_validator_v1 import TranslationValidator
 from modules.prompt_manager import PromptManager
 from modules.ai_translation_editor_dialog import AITranslationEditorDialog
@@ -453,12 +453,14 @@ class ProcessWorker(QThread):
         self.flow_mode = "full_flow"
         self.is_paused = False
         self.ai_folder_opened = False
+        self.auto_mode = False
 
-    def set_task(self, input_file, output_filename, source_mode, flow_mode):
+    def set_task(self, input_file, output_filename, source_mode, flow_mode, auto_mode=False):
         self.input_file = input_file
         self.output_filename = output_filename
         self.source_mode = source_mode
         self.flow_mode = flow_mode
+        self.auto_mode = auto_mode
 
     def run(self):
         try:
@@ -559,12 +561,20 @@ class ProcessWorker(QThread):
         src_file = self.base_path / self.settings[f'txt_{from_stage}'] / f"{from_stage}-txt_{self.output_filename}.txt"
         shutil.copy2(src_file, ai_folder / src_file.name)
         
-        if os.name == 'nt': os.startfile(ai_folder)
-        else: subprocess.call(['xdg-open', str(ai_folder)])
-        self.ai_folder_opened = True # 標記資料夾已開啟
+        if not self.auto_mode: # 自動模式下不開啟資料夾
+            if os.name == 'nt': os.startfile(ai_folder)
+            else: subprocess.call(['xdg-open', str(ai_folder)])
+            self.ai_folder_opened = True # 標記資料夾已開啟
+        else:
+             self.log(f"1D: 全自動模式 - 跳過開啟 AI 資料夾。")
+             
         self.log(f"1D: 檔案已複製到 AI 資料夾。")
         
     def run_2C_get_translation(self):
+        if self.auto_mode:
+            self.run_2C_auto_translation()
+            return
+
         self.progress_updated.emit(50, "等待 2C: AI翻譯結果輸入...")
         ai_folder = self.base_path / self.settings["ai"]
         source_filename = next( (f for f in ai_folder.iterdir() if f.is_file()), None)
@@ -576,6 +586,55 @@ class ProcessWorker(QThread):
         self.is_paused = True
         while self.is_paused: self.msleep(100)
         self.log(f"2C: 已接收翻譯結果。")
+        
+    def run_2C_auto_translation(self):
+        self.progress_updated.emit(50, "執行 2C: AI 自動翻譯中 (背景執行)...")
+        
+        # 準備路徑
+        ai_folder = self.base_path / self.settings["ai"]
+        source_filename = next( (f for f in ai_folder.iterdir() if f.is_file()), None)
+        if not source_filename: raise Exception("找不到AI資料夾中的來源檔案")
+        
+        target_file = self.base_path / self.settings["txt_2B"] / f'2B-txt_{self.output_filename}.txt'
+        
+        # 讀取來源檔案
+        with open(source_filename, 'r', encoding='utf-8') as f:
+            lines = [line.strip() for line in f.readlines()]
+            
+        # 讀取 AI 設定 (使用系統設定)
+        ai_config = self.main_window.settings.get("ai_translation", {}).copy()
+        ai_config["paths"] = self.main_window.settings.get("paths", {})
+        
+        # 初始化翻譯器
+        translator = AITranslator(ai_config)
+        
+        # 驗證連線
+        success, msg = translator.validate_api_connection()
+        if not success:
+             raise Exception(f"AI API 連線失敗: {msg}")
+        self.log(f"API 連線確認: {msg}")
+        
+        # 執行翻譯
+        self.log(f"開始批次翻譯 {len(lines)} 行...請稍候")
+        
+        # 定義進度回調
+        def progress_callback(msg):
+             self.progress_updated.emit(60, f"2C AI翻譯中: {msg}")
+        
+        success, response, error_msg = translator.translate_batch(lines, progress_callback=progress_callback)
+        
+        if not success:
+            raise Exception(f"AI 翻譯失敗: {error_msg}")
+            
+        # 儲存結果
+        # 注意: 這裡得到的 response 是純文字翻譯結果 (含序號)，需要寫入檔案
+        # 這裡假設 AITranslator 返回的格式是直接可用的，或者我們需要做簡單處理?
+        # 根據 ai_translator.py，它返回的是 combined_response (str)
+        
+        with open(target_file, 'w', encoding='utf-8') as f:
+            f.write(response)
+            
+        self.log(f"2C: AI 自動翻譯完成，已寫入 {target_file.name}")
         
     def run_3A_replace_markers(self):
         self.progress_updated.emit(80, "執行 3A: 標記文字還原...")
@@ -715,11 +774,12 @@ class FilenameDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("字幕AI翻譯系統 v0.87.06")
+        self.setWindowTitle("字幕AI翻譯系統 v0.88.01")
         self.resize(700, 750)
         self.output_filename = None
         self.settings = load_settings()
         self.ai_auto_translate_enabled = False  # 新增：追蹤AI自動翻譯啟用狀態
+        self.one_click_auto_mode = False # 新增：一鍵全自動模式狀態
         self.setup_ui()
         self.worker = ProcessWorker(self)
         self.worker.progress_updated.connect(self.update_progress)
@@ -749,6 +809,13 @@ class MainWindow(QMainWindow):
         self.mode_capcut.setChecked(True)
         mode_layout.addWidget(self.mode_capcut)
         mode_layout.addWidget(self.mode_srt)
+        
+        # 新增：一鍵全自動模式勾選框
+        self.auto_mode_checkbox = QCheckBox("一鍵全自動模式 (One-Click Auto)")
+        self.auto_mode_checkbox.setChecked(False)
+        self.auto_mode_checkbox.stateChanged.connect(self.on_auto_mode_changed)
+        mode_layout.addWidget(self.auto_mode_checkbox)
+        
         mode_layout.addStretch()
         source_layout.addLayout(mode_layout)
 
@@ -814,6 +881,12 @@ class MainWindow(QMainWindow):
             self.settings = dialog.get_settings()
             save_settings(self.settings)
             self.log_message("系統設定已儲存。")
+            
+    def on_auto_mode_changed(self, state):
+        self.one_click_auto_mode = bool(state)
+        self.update_flow_description() # 更新流程描述以反映自動模式狀態
+        mode_text = "啟用" if self.one_click_auto_mode else "停用"
+        self.log_message(f"一鍵全自動模式已{mode_text}")
 
     def update_flow_description(self):
         # 完全清空布局中的所有項（包括 layout 和 widget）
@@ -837,7 +910,15 @@ class MainWindow(QMainWindow):
                     hlayout = QHBoxLayout()
                     label = QLabel(desc)
                     self.ai_toggle_btn = QCheckBox("啟用AI自動翻譯")
-                    self.ai_toggle_btn.setChecked(self.ai_auto_translate_enabled)
+                    
+                    if self.one_click_auto_mode:
+                        self.ai_toggle_btn.setChecked(True)
+                        self.ai_toggle_btn.setEnabled(False)
+                        self.ai_toggle_btn.setText("AI自動翻譯 (全自動模式強制啟用)")
+                    else:
+                        self.ai_toggle_btn.setChecked(self.ai_auto_translate_enabled)
+                        self.ai_toggle_btn.setEnabled(True)
+                        
                     self.ai_toggle_btn.stateChanged.connect(self.on_ai_toggle_changed)
                     hlayout.addWidget(label)
                     hlayout.addStretch()
@@ -875,12 +956,30 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "警告", "請選擇名稱為 draft_content.json 的檔案")
             return
 
-        dialog = FilenameDialog(self)
-        if dialog.exec():
-            self.output_filename = dialog.get_filename()
+        if self.one_click_auto_mode:
+            # 全自動模式：自動產生檔名
+            file_path_obj = Path(file_name)
+            if self.mode_capcut.isChecked():
+                # CapCut: 使用父目錄名稱
+                self.output_filename = file_path_obj.parent.name
+            else:
+                 # SRT: 使用檔名 (不含副檔名)
+                self.output_filename = file_path_obj.stem
+            
+            self.log_message(f"全自動模式: 已自動設定輸出檔名為 {self.output_filename}")
+        else:
+            # 手動模式：跳出對話框
+            dialog = FilenameDialog(self)
+            if dialog.exec():
+                self.output_filename = dialog.get_filename()
+            else:
+                return # 使用者取消
+            
+        if self.output_filename: # 確保有檔名 (自動模式必有，手動模式如上判斷)
             if not self.output_filename:
                 QMessageBox.warning(self, "警告", "輸出檔名不可為空")
                 return
+
 
             try:
                 copy_needed = True
@@ -931,9 +1030,10 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "警告", "請先透過按鈕選擇來源檔案並設定輸出檔名")
             return
         
+        
         source_mode = "capcut" if self.mode_capcut.isChecked() else "srt"
         flow_mode = self.flow_combo.currentData()
-        self.worker.set_task(self.worker.input_file, self.output_filename, source_mode, flow_mode)
+        self.worker.set_task(self.worker.input_file, self.output_filename, source_mode, flow_mode, auto_mode=self.one_click_auto_mode)
 
         self.run_btn.setEnabled(False)
         self.file_btn.setEnabled(False)

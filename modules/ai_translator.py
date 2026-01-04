@@ -1,4 +1,6 @@
-# AI Translator v1b - 純通信層版本（移除驗證邏輯）
+# v0.88.01 新增一鍵全自動翻譯
+
+
 import json
 import requests
 import time
