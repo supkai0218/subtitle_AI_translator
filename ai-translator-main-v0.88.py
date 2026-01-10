@@ -1,3 +1,4 @@
+#v0.88.03 新增SRT批次處理功能 (資料夾模式)
 #v0.88.02 一鍵全自動翻譯驗證功能bug fix
 #v0.88.01 新增一鍵全自動翻譯
 
@@ -791,12 +792,17 @@ class FilenameDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("字幕AI翻譯系統 v0.88.01")
+        self.setWindowTitle("字幕AI翻譯系統 v0.88.03")
         self.resize(700, 750)
         self.output_filename = None
         self.settings = load_settings()
-        self.ai_auto_translate_enabled = False  # 新增：追蹤AI自動翻譯啟用狀態
-        self.one_click_auto_mode = False # 新增：一鍵全自動模式狀態
+        self.ai_auto_translate_enabled = False  # 新增:追蹤AI自動翻譯啟用狀態
+        self.one_click_auto_mode = False # 新增:一鍵全自動模式狀態
+        # 批次處理相關屬性
+        self.batch_mode = False  # 是否為批次處理模式
+        self.batch_files = []  # 待處理的檔案列表
+        self.current_batch_index = 0  # 當前處理的檔案索引
+        self.batch_errors = []  # 記錄批次處理中的錯誤
         self.setup_ui()
         self.worker = ProcessWorker(self)
         self.worker.progress_updated.connect(self.update_progress)
@@ -958,14 +964,51 @@ class MainWindow(QMainWindow):
         self.log_message(f"AI自動翻譯已{'啟用' if self.ai_auto_translate_enabled else '停用'}")
 
     def select_file(self):
+        # 重置批次模式狀態
+        self.batch_mode = False
+        self.batch_files = []
+        self.current_batch_index = 0
+        self.batch_errors = []
+        
         if self.mode_capcut.isChecked():
             default_dir = self.settings["paths"].get("capcut_drafts_dir", os.path.expanduser("~"))
             if not Path(default_dir).is_dir(): default_dir = os.path.expanduser("~")
             file_name, _ = QFileDialog.getOpenFileName(self, "選擇 CapCut 的 draft_content.json", default_dir, "JSON Files (draft_content.json)")
         else:
+            # SRT模式
             default_dir = self.settings["paths"].get("srt_input", os.path.expanduser("~"))
             if not Path(default_dir).is_dir(): default_dir = os.path.expanduser("~")
-            file_name, _ = QFileDialog.getOpenFileName(self, "選擇來源 SRT 檔案", default_dir, "SRT Files (*.srt)")
+            
+            # 如果是SRT模式且啟用全自動模式,提供選擇檔案或資料夾的選項
+            if self.one_click_auto_mode:
+                # 建立選擇對話框
+                choice_dialog = QMessageBox(self)
+                choice_dialog.setWindowTitle("選擇來源類型")
+                choice_dialog.setText("請選擇要處理的來源類型:")
+                choice_dialog.setIcon(QMessageBox.Icon.Question)
+                
+                btn_file = choice_dialog.addButton("單一SRT檔案", QMessageBox.ButtonRole.AcceptRole)
+                btn_folder = choice_dialog.addButton("資料夾(批次處理)", QMessageBox.ButtonRole.AcceptRole)
+                choice_dialog.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+                
+                choice_dialog.exec()
+                clicked_button = choice_dialog.clickedButton()
+                
+                if clicked_button == btn_file:
+                    # 選擇單一檔案
+                    file_name, _ = QFileDialog.getOpenFileName(self, "選擇來源 SRT 檔案", default_dir, "SRT Files (*.srt)")
+                elif clicked_button == btn_folder:
+                    # 選擇資料夾進行批次處理
+                    folder_path = QFileDialog.getExistingDirectory(self, "選擇包含SRT檔案的資料夾", default_dir)
+                    if folder_path:
+                        self.scan_and_prepare_batch(folder_path)
+                    return
+                else:
+                    # 取消
+                    return
+            else:
+                # 非全自動模式,只能選擇單一檔案
+                file_name, _ = QFileDialog.getOpenFileName(self, "選擇來源 SRT 檔案", default_dir, "SRT Files (*.srt)")
 
         if not file_name: return
 
@@ -1040,9 +1083,76 @@ class MainWindow(QMainWindow):
                 
                 self.log_message(f"已選擇檔案: {file_name}")
             except Exception as e:
-                self.show_error(f"準備檔案時發生錯誤：{e}")
+                self.show_error(f"準備檔案時發生錯誤:{e}")
+    
+    def scan_and_prepare_batch(self, folder_path):
+        """掃描資料夾中的所有SRT檔案並準備批次處理"""
+        try:
+            self.log_message(f"正在掃描資料夾: {folder_path}")
+            
+            # 遞迴掃描所有.srt檔案
+            srt_files = []
+            for root, dirs, files in os.walk(folder_path):
+                for file in files:
+                    if file.lower().endswith('.srt'):
+                        full_path = Path(root) / file
+                        srt_files.append(full_path)
+            
+            if not srt_files:
+                QMessageBox.warning(self, "警告", f"在資料夾 {folder_path} 中未找到任何SRT檔案")
+                return
+            
+            # 按修改時間排序
+            srt_files.sort(key=lambda x: x.stat().st_mtime)
+            
+            # 顯示確認對話框
+            file_list_text = "\n".join([f"{i+1}. {f.name} ({f.parent})" for i, f in enumerate(srt_files[:10])])
+            if len(srt_files) > 10:
+                file_list_text += f"\n... 以及其他 {len(srt_files) - 10} 個檔案"
+            
+            confirm_msg = f"找到 {len(srt_files)} 個SRT檔案:\n\n{file_list_text}\n\n是否開始批次處理?"
+            reply = QMessageBox.question(self, "確認批次處理", confirm_msg, 
+                                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                self.batch_mode = True
+                self.batch_files = srt_files
+                self.current_batch_index = 0
+                self.batch_errors = []
+                
+                # 更新UI顯示
+                self.file_label.setText(f"批次模式: {len(srt_files)} 個檔案待處理")
+                self.output_label.setText(f"批次處理模式")
+                
+                self.log_message(f"批次處理已準備完成,共 {len(srt_files)} 個檔案")
+            else:
+                self.log_message("使用者取消批次處理")
+                
+        except Exception as e:
+            self.show_error(f"掃描資料夾時發生錯誤: {e}")
 
     def start_processing(self):
+        # 檢查批次模式
+        if self.batch_mode:
+            if not self.batch_files:
+                QMessageBox.warning(self, "警告", "批次處理模式下沒有待處理的檔案")
+                return
+            
+            # 重置批次處理狀態
+            self.current_batch_index = 0
+            self.batch_errors = []
+            
+            self.run_btn.setEnabled(False)
+            self.file_btn.setEnabled(False)
+            self.flow_combo.setEnabled(False)
+            self.log_text.clear()
+            self.progress_bar.setValue(0)
+            
+            self.log_message(f"開始批次處理,共 {len(self.batch_files)} 個檔案")
+            self.process_next_batch_file()
+            return
+        
+        # 單檔處理模式
         if not self.worker.input_file or not self.output_filename:
             QMessageBox.warning(self, "警告", "請先透過按鈕選擇來源檔案並設定輸出檔名")
             return
@@ -1058,6 +1168,63 @@ class MainWindow(QMainWindow):
         self.log_text.clear()
         self.progress_bar.setValue(0)
         self.worker.start()
+    
+    def process_next_batch_file(self):
+        """處理批次列表中的下一個檔案"""
+        if self.current_batch_index >= len(self.batch_files):
+            # 所有檔案處理完成
+            self.show_batch_report()
+            return
+        
+        # 取得當前要處理的檔案
+        current_file = self.batch_files[self.current_batch_index]
+        self.output_filename = current_file.stem  # 使用檔名(不含副檔名)作為輸出檔名
+        
+        self.log_message(f"\n{'='*60}")
+        self.log_message(f"批次處理 ({self.current_batch_index + 1}/{len(self.batch_files)}): {current_file.name}")
+        self.log_message(f"{'='*60}")
+        
+        try:
+            # 準備檔案
+            dest_dir = Path(os.getcwd()) / self.settings["paths"]["srt_input"]
+            dest_path = dest_dir / f"{self.output_filename}.srt"
+            
+            # 檢查是否需要複製
+            copy_needed = True
+            try:
+                resolved_source = current_file.resolve()
+                resolved_dest = dest_path.resolve()
+                if resolved_source == resolved_dest:
+                    copy_needed = False
+                    assigned_input_path = str(resolved_source)
+                    self.log_message(f"[資訊] SRT 來源已位於輸入資料夾,略過複製")
+                else:
+                    dest_dir.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(current_file, dest_path)
+                    assigned_input_path = str(dest_path)
+                    self.log_message(f"檔案已複製到: {dest_path}")
+            except Exception as e:
+                self.log_message(f"警告: 檔案複製時發生問題: {e},使用原始路徑")
+                assigned_input_path = str(current_file)
+            
+            # 設定worker並開始處理
+            source_mode = "srt"
+            flow_mode = self.flow_combo.currentData()
+            self.worker.set_task(assigned_input_path, self.output_filename, source_mode, flow_mode, auto_mode=self.one_click_auto_mode)
+            self.worker.start()
+            
+        except Exception as e:
+            # 記錄錯誤並繼續下一個
+            error_msg = f"準備檔案 {current_file.name} 時發生錯誤: {e}"
+            self.log_message(f"錯誤: {error_msg}")
+            self.batch_errors.append({
+                'file': current_file.name,
+                'error': str(e),
+                'stage': '檔案準備'
+            })
+            # 繼續處理下一個檔案
+            self.current_batch_index += 1
+            self.process_next_batch_file()
 
     def run_manual_1B_filter(self):
         self.log_message("手動執行 1B 過濾文字管理...")
@@ -1099,19 +1266,50 @@ class MainWindow(QMainWindow):
         self.settings = load_settings()
 
     def process_completed(self):
-        self.run_btn.setEnabled(True)
-        self.file_btn.setEnabled(True)
-        self.flow_combo.setEnabled(True)
-        self.log_message("所有處理已完成！")
-        QMessageBox.information(self, "完成", "選擇的流程已成功執行完畢！")
+        # 檢查是否為批次模式
+        if self.batch_mode:
+            self.log_message(f"檔案 {self.batch_files[self.current_batch_index].name} 處理完成")
+            # 移動到下一個檔案
+            self.current_batch_index += 1
+            
+            # 更新整體進度
+            overall_progress = int((self.current_batch_index / len(self.batch_files)) * 100)
+            self.progress_bar.setValue(overall_progress)
+            
+            # 繼續處理下一個檔案
+            self.process_next_batch_file()
+        else:
+            # 單檔處理模式
+            self.run_btn.setEnabled(True)
+            self.file_btn.setEnabled(True)
+            self.flow_combo.setEnabled(True)
+            self.log_message("所有處理已完成！")
+            QMessageBox.information(self, "完成", "選擇的流程已成功執行完畢！")
 
     def show_error(self, error_message):
-        self.run_btn.setEnabled(True)
-        self.file_btn.setEnabled(True)
-        self.flow_combo.setEnabled(True)
-        self.log_message(f"錯誤: {error_message}")
-        self.status_label.setText("發生錯誤！")
-        QMessageBox.critical(self, "錯誤", str(error_message))
+        # 檢查是否為批次模式
+        if self.batch_mode:
+            # 記錄錯誤
+            current_file = self.batch_files[self.current_batch_index]
+            self.batch_errors.append({
+                'file': current_file.name,
+                'error': error_message,
+                'stage': '處理過程'
+            })
+            self.log_message(f"錯誤: {error_message}")
+            self.log_message(f"跳過檔案 {current_file.name},繼續處理下一個...")
+            
+            # 繼續處理下一個檔案
+            self.current_batch_index += 1
+            self.process_next_batch_file()
+        else:
+            # 單檔處理模式
+            self.run_btn.setEnabled(True)
+            self.file_btn.setEnabled(True)
+            self.flow_combo.setEnabled(True)
+            self.log_message(f"錯誤: {error_message}")
+            self.status_label.setText("發生錯誤！")
+            QMessageBox.critical(self, "錯誤", str(error_message))
         
     def show_translation_editor(self, source_file, target_file):
         self.log_message("流程暫停，等待使用者輸入翻譯結果...")
@@ -1144,6 +1342,47 @@ class MainWindow(QMainWindow):
             else:
                 self.worker.error_occurred.emit("使用者取消了翻譯輸入，流程已中止。")
     
+    def show_batch_report(self):
+        """顯示批次處理完成報告"""
+        self.run_btn.setEnabled(True)
+        self.file_btn.setEnabled(True)
+        self.flow_combo.setEnabled(True)
+        self.progress_bar.setValue(100)
+        
+        total_files = len(self.batch_files)
+        success_count = total_files - len(self.batch_errors)
+        error_count = len(self.batch_errors)
+        
+        # 建立報告訊息
+        report_msg = f"批次處理完成!\n\n"
+        report_msg += f"總檔案數: {total_files}\n"
+        report_msg += f"成功: {success_count}\n"
+        report_msg += f"失敗: {error_count}\n"
+        
+        if self.batch_errors:
+            report_msg += f"\n失敗檔案清單:\n"
+            for i, error_info in enumerate(self.batch_errors, 1):
+                report_msg += f"{i}. {error_info['file']}\n"
+                report_msg += f"   階段: {error_info['stage']}\n"
+                report_msg += f"   錯誤: {error_info['error']}\n\n"
+        
+        self.log_message("\n" + "="*60)
+        self.log_message("批次處理報告")
+        self.log_message("="*60)
+        self.log_message(report_msg)
+        
+        # 顯示對話框
+        if error_count > 0:
+            QMessageBox.warning(self, "批次處理完成(有錯誤)", report_msg)
+        else:
+            QMessageBox.information(self, "批次處理完成", report_msg)
+        
+        # 重置批次模式
+        self.batch_mode = False
+        self.batch_files = []
+        self.current_batch_index = 0
+        self.batch_errors = []
+
     def update_progress(self, value, message):
         if value >= 0:
             self.progress_bar.setValue(value)
