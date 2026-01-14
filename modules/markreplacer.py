@@ -48,6 +48,7 @@ class MarkerReplacer:
         """
         # 修正: 確保 self.db 有被載入
         if not self.db:
+            self.debug_log(f"警告: 嘗試取得標記 {marker} 但資料庫未載入")
             return f"[[資料庫未載入_{marker}]]"
             
         category, item_id = marker.split('-')
@@ -58,10 +59,21 @@ class MarkerReplacer:
             
             if ',' in translation:
                 translation = random.choice(translation.split(','))
+            
+            # 診斷：記錄成功的替換（限制輸出數量）
+            if not hasattr(self, '_translation_log_count'):
+                self._translation_log_count = 0
+            if self._translation_log_count < 3:
+                self.debug_log(f"標記 [[{marker}]] -> {translation}")
+                self._translation_log_count += 1
                 
             return translation
-        except KeyError:
-            print(f"警告: 資料庫中找不到標記 {marker}")
+        except KeyError as e:
+            self.debug_log(f"警告: 資料庫中找不到標記 {marker}，KeyError: {e}")
+            self.debug_log(f"  可用類別: {list(self.db.keys())}")
+            if category in self.db:
+                available_items = list(self.db[category].get("items", {}).keys())[:5]
+                self.debug_log(f"  類別 {category} 中的項目範例: {available_items}")
             return f"[[{marker}]]"
 
     def replace_markers(self, text: str) -> str:
@@ -145,24 +157,41 @@ class MarkerReplacer:
             self.report_progress(20, "載入標記資料庫...")
             with open(db_path, 'r', encoding='utf-8') as f:
                 self.db = json.load(f)
+            
+            # 診斷：檢查資料庫內容
+            db_categories = list(self.db.keys()) if self.db else []
+            self.debug_log(f"標記資料庫已載入，包含類別: {db_categories}")
+            if self.db:
+                for cat in db_categories[:3]:  # 只顯示前3個類別
+                    items_count = len(self.db[cat].get("items", {}))
+                    self.debug_log(f"  類別 {cat}: {items_count} 個標記項目")
 
             # 讀取輸入檔案
             self.report_progress(40, f"讀取輸入檔案... ({input_path.name})")
             with open(input_path, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
+            self.debug_log(f"讀取了 {len(lines)} 行輸入")
 
             # 處理每一行
             self.report_progress(60, "替換標記...")
             processed_lines = []
-            for line in lines:
+            replacement_count = 0  # 診斷：計數實際替換次數
+            for line_num, line in enumerate(lines, 1):
                 parts = line.strip().split(':', 1)
                 if len(parts) == 2:
                     number, text = parts
-                    processed_text = self.replace_markers(text.strip())
+                    original_text = text.strip()
+                    processed_text = self.replace_markers(original_text)
+                    if original_text != processed_text:
+                        replacement_count += 1
+                        if replacement_count <= 3:  # 只記錄前3次替換
+                            self.debug_log(f"第{line_num}行替換: [{original_text}] -> [{processed_text}]")
                     processed_lines.append(f"{number}:{processed_text}\n")
                 else:
                     # 如果行不包含 ':', 保持原樣
                     processed_lines.append(line)
+            
+            self.debug_log(f"完成處理，共替換了 {replacement_count} 行文字")
 
             # 確保輸出目錄存在
             output_dir.mkdir(parents=True, exist_ok=True)

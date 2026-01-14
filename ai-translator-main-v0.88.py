@@ -1,3 +1,5 @@
+#v0.88.05 修正AI自動翻譯後2B檔案序號被移除的問題，導致3A標記還原失敗
+#v0.88.04 新增診斷日誌以追蹤標記還原流程
 #v0.88.03 新增SRT批次處理功能 (資料夾模式)
 #v0.88.02 一鍵全自動翻譯驗證功能bug fix
 #v0.88.01 新增一鍵全自動翻譯
@@ -476,15 +478,22 @@ class ProcessWorker(QThread):
             for key in ["txt_1A", "txt_1B", "txt_1C", "txt_2B", "txt_3A", "ai"]:
                 (self.base_path / self.settings[key]).mkdir(parents=True, exist_ok=True)
             
+            self.log(f"[診斷] 開始執行流程，flow_mode={self.flow_mode}, auto_mode={self.auto_mode}")
             self.progress_updated.emit(10, "執行 1A: 字幕/時間軸拆解...")
             self.run_1A_parse()
 
             if self.flow_mode == "full_flow":
+                self.log(f"[診斷] full_flow 流程開始")
                 self.run_1B_filter()
+                self.log(f"[診斷] 1B完成，準備執行1C")
                 self.run_1C_mark(from_stage='1B')
+                self.log(f"[診斷] 1C完成，準備執行1D")
                 self.run_1D_copy_for_ai(from_stage='1C')
+                self.log(f"[診斷] 1D完成，準備執行2C")
                 self.run_2C_get_translation()
+                self.log(f"[診斷] 2C完成，準備執行3A")
                 self.run_3A_replace_markers()
+                self.log(f"[診斷] 3A完成，準備執行3B")
                 self.run_3B_merge(text_stage='3A', time_stage='1B')
             
             elif self.flow_mode == "parse_only":
@@ -573,10 +582,14 @@ class ProcessWorker(QThread):
         self.log(f"1D: 檔案已複製到 AI 資料夾。")
         
     def run_2C_get_translation(self):
+        self.log(f"[診斷] 進入 run_2C_get_translation，auto_mode={self.auto_mode}")
         if self.auto_mode:
+            self.log(f"[診斷] 全自動模式啟用，將呼叫 run_2C_auto_translation")
             self.run_2C_auto_translation()
+            self.log(f"[診斷] run_2C_auto_translation 完成，準備返回並繼續下一步")
             return
 
+        self.log(f"[診斷] 手動模式，等待使用者輸入翻譯")
         self.progress_updated.emit(50, "等待 2C: AI翻譯結果輸入...")
         ai_folder = self.base_path / self.settings["ai"]
         source_filename = next( (f for f in ai_folder.iterdir() if f.is_file()), None)
@@ -637,14 +650,11 @@ class ProcessWorker(QThread):
             self.log(f"警告: 翻譯驗證未完全通過: {validation_msg}")
         
         # 將 repaired_result (List[str]) 轉換回文字內容
-        # 這裡需要移除 validate_response 返回的 "序號:內容" 中的序號，只保留翻譯文字
+        # 【修正】保留序號格式 "序號:內容"，因為後續的3A步驟需要這個格式
         cleaned_translations = []
         for line in repaired_result:
-            if ':' in line:
-                _, content = line.split(':', 1)
-                cleaned_translations.append(content.strip())
-            else:
-                cleaned_translations.append(line.strip())
+            # repaired_result已經是"序號:內容"格式，直接使用
+            cleaned_translations.append(line.strip())
         
         combined_cleaned_response = "\n".join(cleaned_translations)
             
@@ -655,6 +665,7 @@ class ProcessWorker(QThread):
         self.log(f"2C: AI 自動翻譯完成 (與驗證)，已寫入 {target_file.name}")
         
     def run_3A_replace_markers(self):
+        self.log(f"[診斷] 進入 run_3A_replace_markers")
         self.progress_updated.emit(80, "執行 3A: 標記文字還原...")
         markers_path = self.settings.get('markers_db')
         txt_2b_path = self.settings.get('txt_2B')
@@ -792,7 +803,7 @@ class FilenameDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("字幕AI翻譯系統 v0.88.03")
+        self.setWindowTitle("字幕AI翻譯系統 v0.88.05")
         self.resize(700, 750)
         self.output_filename = None
         self.settings = load_settings()
