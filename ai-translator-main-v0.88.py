@@ -1,3 +1,4 @@
+#v0.88.06 修正一鍵自動執行模式的問題：(1)視窗大小鎖定防止變大 (2)修正資料夾開啟邏輯 (3)子資料夾是否遞迴
 #v0.88.05 修正AI自動翻譯後2B檔案序號被移除的問題，導致3A標記還原失敗
 #v0.88.04 新增診斷日誌以追蹤標記還原流程
 #v0.88.03 新增SRT批次處理功能 (資料夾模式)
@@ -712,8 +713,8 @@ class ProcessWorker(QThread):
         else:
             self.log("資訊: 找不到1B階段檔案，跳過生成原文raw字幕。")
         
-        # 檢查並開啟 AI 資料夾
-        if not self.ai_folder_opened:
+        # 檢查並開啟 AI 資料夾（全自動模式下不開啟）
+        if not self.ai_folder_opened and not self.auto_mode:
             if os.name == 'nt': os.startfile(ai_folder)
             else: subprocess.call(['xdg-open', str(ai_folder)])
             self.ai_folder_opened = True
@@ -803,12 +804,15 @@ class FilenameDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("字幕AI翻譯系統 v0.88.05")
+        self.setWindowTitle("字幕AI翻譯系統 v0.88.06")
         self.resize(700, 750)
+        self.setMinimumSize(700, 750)  # 設定最小尺寸，防止視窗縮小
+        # 視窗大小不鎖定，允許使用者手動放大（如需完全鎖定可加上 self.setMaximumSize(700, 750)）
         self.output_filename = None
         self.settings = load_settings()
         self.ai_auto_translate_enabled = False  # 新增:追蹤AI自動翻譯啟用狀態
         self.one_click_auto_mode = False # 新增:一鍵全自動模式狀態
+        self.include_subfolders = True  # 新增:批次處理時是否包含子資料夾（預設包含）
         # 批次處理相關屬性
         self.batch_mode = False  # 是否為批次處理模式
         self.batch_files = []  # 待處理的檔案列表
@@ -849,6 +853,17 @@ class MainWindow(QMainWindow):
         self.auto_mode_checkbox.setChecked(False)
         self.auto_mode_checkbox.stateChanged.connect(self.on_auto_mode_changed)
         mode_layout.addWidget(self.auto_mode_checkbox)
+        
+        # 新增：子資料夾處理選項（略微縮排）
+        subfolder_layout = QHBoxLayout()
+        subfolder_layout.addSpacing(20)  # 左側縮排
+        self.include_subfolders_checkbox = QCheckBox("包含子資料夾")
+        self.include_subfolders_checkbox.setChecked(True)  # 預設啟用
+        self.include_subfolders_checkbox.setEnabled(False)  # 預設停用，等待全自動模式啟用
+        self.include_subfolders_checkbox.stateChanged.connect(self.on_include_subfolders_changed)
+        subfolder_layout.addWidget(self.include_subfolders_checkbox)
+        subfolder_layout.addStretch()
+        mode_layout.addLayout(subfolder_layout)
         
         mode_layout.addStretch()
         source_layout.addLayout(mode_layout)
@@ -921,6 +936,15 @@ class MainWindow(QMainWindow):
         self.update_flow_description() # 更新流程描述以反映自動模式狀態
         mode_text = "啟用" if self.one_click_auto_mode else "停用"
         self.log_message(f"一鍵全自動模式已{mode_text}")
+        
+        # 新增：控制子資料夾選項的啟用狀態
+        self.include_subfolders_checkbox.setEnabled(self.one_click_auto_mode)
+    
+    def on_include_subfolders_changed(self, state):
+        """當使用者切換「包含子資料夾」選項時"""
+        self.include_subfolders = bool(state)
+        mode_text = "包含子資料夾" if self.include_subfolders else "僅目前資料夾"
+        self.log_message(f"批次處理模式已切換為: {mode_text}")
 
     def update_flow_description(self):
         # 完全清空布局中的所有項（包括 layout 和 widget）
@@ -1101,13 +1125,23 @@ class MainWindow(QMainWindow):
         try:
             self.log_message(f"正在掃描資料夾: {folder_path}")
             
-            # 遞迴掃描所有.srt檔案
+            # 根據設定選擇掃描方式
             srt_files = []
-            for root, dirs, files in os.walk(folder_path):
-                for file in files:
-                    if file.lower().endswith('.srt'):
-                        full_path = Path(root) / file
-                        srt_files.append(full_path)
+            if self.include_subfolders:
+                # 遞迴掃描所有子資料夾
+                self.log_message(f"掃描模式: 包含子資料夾")
+                for root, dirs, files in os.walk(folder_path):
+                    for file in files:
+                        if file.lower().endswith('.srt'):
+                            full_path = Path(root) / file
+                            srt_files.append(full_path)
+            else:
+                # 只掃描目前資料夾
+                self.log_message(f"掃描模式: 僅目前資料夾")
+                folder_path_obj = Path(folder_path)
+                for file in folder_path_obj.iterdir():
+                    if file.is_file() and file.name.lower().endswith('.srt'):
+                        srt_files.append(file)
             
             if not srt_files:
                 QMessageBox.warning(self, "警告", f"在資料夾 {folder_path} 中未找到任何SRT檔案")
@@ -1291,6 +1325,19 @@ class MainWindow(QMainWindow):
             self.process_next_batch_file()
         else:
             # 單檔處理模式
+            # 在全自動模式下，開啟 SRT 輸出資料夾
+            if self.one_click_auto_mode:
+                srt_output_folder = Path(os.getcwd()) / self.settings["paths"]["srt_output"]
+                if srt_output_folder.exists():
+                    try:
+                        if os.name == 'nt':
+                            os.startfile(str(srt_output_folder))
+                        else:
+                            subprocess.call(['xdg-open', str(srt_output_folder)])
+                        self.log_message(f"已開啟 SRT 輸出資料夾: {srt_output_folder}")
+                    except Exception as e:
+                        self.log_message(f"無法開啟 SRT 輸出資料夾: {e}")
+            
             self.run_btn.setEnabled(True)
             self.file_btn.setEnabled(True)
             self.flow_combo.setEnabled(True)
@@ -1359,6 +1406,19 @@ class MainWindow(QMainWindow):
         self.file_btn.setEnabled(True)
         self.flow_combo.setEnabled(True)
         self.progress_bar.setValue(100)
+        
+        # 在全自動模式下，開啟 SRT 輸出資料夾
+        if self.one_click_auto_mode:
+            srt_output_folder = Path(os.getcwd()) / self.settings["paths"]["srt_output"]
+            if srt_output_folder.exists():
+                try:
+                    if os.name == 'nt':
+                        os.startfile(str(srt_output_folder))
+                    else:
+                        subprocess.call(['xdg-open', str(srt_output_folder)])
+                    self.log_message(f"批次處理完成，已開啟 SRT 輸出資料夾: {srt_output_folder}")
+                except Exception as e:
+                    self.log_message(f"無法開啟 SRT 輸出資料夾: {e}")
         
         total_files = len(self.batch_files)
         success_count = total_files - len(self.batch_errors)
