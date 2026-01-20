@@ -1,3 +1,4 @@
+#v0.89.01 新增自訂3B流程原文字幕自定義後綴檔名功能
 #v0.89.00 新增1B時間碼過濾及修正功能：支援設定最大時長閾值和目標時長
 #v0.88.06 修正一鍵自動執行模式的問題：(1)視窗大小鎖定防止變大 (2)修正資料夾開啟邏輯 (3)子資料夾是否遞迴
 #v0.88.05 修正AI自動翻譯後2B檔案序號被移除的問題，導致3A標記還原失敗
@@ -119,6 +120,10 @@ DEFAULT_SETTINGS = {
         "timecode_correction_enabled": False,
         "timecode_max_duration": 5.0,
         "timecode_target_duration": 3.0
+    },
+    "raw_subtitle": {
+        "enabled": True,
+        "suffix": "_raw"
     }
 }
 
@@ -176,6 +181,14 @@ def load_settings():
                 for key, value in DEFAULT_SETTINGS["text_filter"].items():
                     if key not in settings["text_filter"]:
                         settings["text_filter"][key] = value
+
+            # 確保raw_subtitle設定完整
+            if "raw_subtitle" not in settings:
+                settings["raw_subtitle"] = DEFAULT_SETTINGS["raw_subtitle"].copy()
+            else:
+                for key, value in DEFAULT_SETTINGS["raw_subtitle"].items():
+                    if key not in settings["raw_subtitle"]:
+                        settings["raw_subtitle"][key] = value
 
             return settings
         except Exception:
@@ -729,18 +742,24 @@ class ProcessWorker(QThread):
         if not success: raise Exception(f"合併主要字幕失敗: {msg}")
         shutil.copy2(srt_out_file, ai_folder / srt_out_file.name) # 複製到 AI 資料夾
 
-        # 條件式生成 raw 版字幕
-        raw_text_file = self.base_path / self.settings['txt_1B'] / f"1B-txt_{self.output_filename}.txt"
-        raw_time_file = self.base_path / self.settings['txt_1B'] / f"1B-time_{self.output_filename}.txt"
-        if raw_text_file.exists() and raw_time_file.exists():
-            srt_raw_out_file = output_dir / f"{self.output_filename}_raw.srt"
-            success, msg = merger.merge_files(self.output_filename, str(raw_text_file), str(raw_time_file), str(srt_raw_out_file))
-            if not success: 
-                self.log(f"警告: 合併原文raw字幕失敗: {msg}")
+        # 條件式生成 raw 版字幕（根據設定決定）
+        if self.main_window.raw_subtitle_enabled:
+            raw_text_file = self.base_path / self.settings['txt_1B'] / f"1B-txt_{self.output_filename}.txt"
+            raw_time_file = self.base_path / self.settings['txt_1B'] / f"1B-time_{self.output_filename}.txt"
+            if raw_text_file.exists() and raw_time_file.exists():
+                # 使用自定義後綴
+                suffix = self.main_window.raw_subtitle_suffix if self.main_window.raw_subtitle_suffix else "_raw"
+                srt_raw_out_file = output_dir / f"{self.output_filename}{suffix}.srt"
+                success, msg = merger.merge_files(self.output_filename, str(raw_text_file), str(raw_time_file), str(srt_raw_out_file))
+                if not success:
+                    self.log(f"警告: 合併原文raw字幕失敗: {msg}")
+                else:
+                    shutil.copy2(srt_raw_out_file, ai_folder / srt_raw_out_file.name) # 複製到 AI 資料夾
+                    self.log(f"已生成原文字幕: {srt_raw_out_file.name}")
             else:
-                shutil.copy2(srt_raw_out_file, ai_folder / srt_raw_out_file.name) # 複製到 AI 資料夾
+                self.log("資訊: 找不到1B階段檔案，跳過生成原文raw字幕。")
         else:
-            self.log("資訊: 找不到1B階段檔案，跳過生成原文raw字幕。")
+            self.log("資訊: 原文字幕生成功能已停用，跳過生成。")
         
         # 檢查並開啟 AI 資料夾（全自動模式下不開啟）
         if not self.ai_folder_opened and not self.auto_mode:
@@ -833,7 +852,7 @@ class FilenameDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("字幕AI翻譯系統 v0.89.00")
+        self.setWindowTitle("字幕AI翻譯系統 v0.89.01")
         self.resize(700, 750)
         self.setMinimumSize(700, 750)  # 設定最小尺寸，防止視窗縮小
         # 視窗大小不鎖定，允許使用者手動放大（如需完全鎖定可加上 self.setMaximumSize(700, 750)）
@@ -848,6 +867,11 @@ class MainWindow(QMainWindow):
         self.timecode_correction_enabled = text_filter_config.get("timecode_correction_enabled", False)
         self.timecode_max_duration = text_filter_config.get("timecode_max_duration", 5.0)
         self.timecode_target_duration = text_filter_config.get("timecode_target_duration", 3.0)
+        
+        # 新增：raw字幕設定參數
+        raw_subtitle_config = self.settings.get("raw_subtitle", {})
+        self.raw_subtitle_enabled = raw_subtitle_config.get("enabled", True)
+        self.raw_subtitle_suffix = raw_subtitle_config.get("suffix", "_raw")
         
         # 批次處理相關屬性
         self.batch_mode = False  # 是否為批次處理模式
@@ -1048,6 +1072,28 @@ class MainWindow(QMainWindow):
                     hlayout.addStretch()
                     hlayout.addWidget(self.ai_toggle_btn)
                     self.workflow_preview_layout.addLayout(hlayout)
+                elif step_id == "3B":
+                    # 為 3B 步驟添加標籤和 raw 字幕設定
+                    hlayout = QHBoxLayout()
+                    label = QLabel(desc)
+                    hlayout.addWidget(label)
+                    hlayout.addStretch()
+                    
+                    # raw 字幕啟用勾選框
+                    self.raw_subtitle_checkbox = QCheckBox("生成原文字幕")
+                    self.raw_subtitle_checkbox.setChecked(self.raw_subtitle_enabled)
+                    self.raw_subtitle_checkbox.stateChanged.connect(self.on_raw_subtitle_toggle_changed)
+                    hlayout.addWidget(self.raw_subtitle_checkbox)
+                    
+                    # 後綴名稱輸入
+                    hlayout.addWidget(QLabel("後綴:"))
+                    self.raw_subtitle_suffix_input = QLineEdit(self.raw_subtitle_suffix)
+                    self.raw_subtitle_suffix_input.setMaximumWidth(80)
+                    self.raw_subtitle_suffix_input.setEnabled(self.raw_subtitle_enabled)
+                    self.raw_subtitle_suffix_input.textChanged.connect(self.on_raw_subtitle_suffix_changed)
+                    hlayout.addWidget(self.raw_subtitle_suffix_input)
+                    
+                    self.workflow_preview_layout.addLayout(hlayout)
                 else:
                     self.workflow_preview_layout.addWidget(QLabel(desc))
 
@@ -1075,6 +1121,27 @@ class MainWindow(QMainWindow):
     def on_ai_toggle_changed(self, state):
         self.ai_auto_translate_enabled = bool(state)
         self.log_message(f"AI自動翻譯已{'啟用' if self.ai_auto_translate_enabled else '停用'}")
+
+    def on_raw_subtitle_toggle_changed(self, state):
+        """raw字幕生成開關切換事件"""
+        self.raw_subtitle_enabled = bool(state)
+        if hasattr(self, 'raw_subtitle_suffix_input'):
+            self.raw_subtitle_suffix_input.setEnabled(self.raw_subtitle_enabled)
+        self.log_message(f"原文字幕生成已{'啟用' if self.raw_subtitle_enabled else '停用'}")
+        
+        # 保存設定
+        self.settings.setdefault("raw_subtitle", {})
+        self.settings["raw_subtitle"]["enabled"] = self.raw_subtitle_enabled
+        save_settings(self.settings)
+
+    def on_raw_subtitle_suffix_changed(self, text):
+        """raw字幕後綴名稱變更事件"""
+        self.raw_subtitle_suffix = text.strip()
+        
+        # 保存設定
+        self.settings.setdefault("raw_subtitle", {})
+        self.settings["raw_subtitle"]["suffix"] = self.raw_subtitle_suffix
+        save_settings(self.settings)
 
     def select_file(self):
         # 重置批次模式狀態
