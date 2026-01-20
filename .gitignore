@@ -2,6 +2,7 @@
 /settings/
 /modules/__pycache__/
 /doc/
+/plans/
 *.pyc
 *.pyo
 *.pyd
