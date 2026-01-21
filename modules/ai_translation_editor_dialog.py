@@ -1,3 +1,4 @@
+#v0.89.02 新增介面語言包切換功能(繁中/英文，介面切換進度80%)
 #v0.88.02 一鍵全自動翻譯驗證功能bug fix
 #V0.88.01 支援一鍵全自動翻譯
 #V0.87.06 支援Prompt_manager模板資料庫路徑設定
@@ -102,7 +103,15 @@ class TranslationProgressWindow(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("AI翻譯進度")
+        # 初始化語言管理器
+        from modules.language_manager import LanguageManager
+        self.language_manager = LanguageManager()
+
+        # 從父視窗獲取語言管理器（如果存在），否則使用預設
+        if parent and hasattr(parent, 'language_manager'):
+            self.language_manager = parent.language_manager
+
+        self.setWindowTitle(self.language_manager.get_text("progress_window_title", "AI Translation Progress"))
         self.resize(600, 500)
         self.setModal(True)
 
@@ -116,7 +125,7 @@ class TranslationProgressWindow(QDialog):
         layout = QVBoxLayout(self)
 
         # 標題
-        title_label = QLabel("翻譯進度實時監控")
+        title_label = QLabel(self.language_manager.get_text("real_time_monitoring", "Translation Progress Real-time Monitoring"))
         title_font = QFont()
         title_font.setPointSize(12)
         title_font.setBold(True)
@@ -135,13 +144,13 @@ class TranslationProgressWindow(QDialog):
         layout.addWidget(self.progress_bar)
 
         # 統計信息
-        self.stats_label = QLabel("已接收消息: 0")
+        self.stats_label = QLabel(self.language_manager.get_text("messages_received", "Messages Received: 0").format(count=0))
         layout.addWidget(self.stats_label)
 
         # 按鈕區域
         button_layout = QHBoxLayout()
 
-        self.cancel_btn = QPushButton("取消翻譯")
+        self.cancel_btn = QPushButton(self.language_manager.get_text("cancel_translation", "Cancel Translation"))
         self.cancel_btn.clicked.connect(self.on_cancel_clicked)
 
         button_layout.addStretch()
@@ -170,12 +179,12 @@ class TranslationProgressWindow(QDialog):
         self.progress_text.setTextCursor(cursor)
 
         # 更新統計
-        self.stats_label.setText(f"已接收消息: {self.message_count}")
+        self.stats_label.setText(self.language_manager.get_text("messages_received", "Messages Received: {count}").format(count=self.message_count))
 
     def on_cancel_clicked(self):
         """取消按鈕被點擊"""
         self.cancel_btn.setEnabled(False)
-        self.cancel_btn.setText("正在取消...")
+        self.cancel_btn.setText(self.language_manager.get_text("cancelling_translation", "Cancelling..."))
         self.reject()
 
     def closeEvent(self, event):
@@ -208,6 +217,14 @@ class AITranslationEditorDialog(QDialog):
         self.translated_lines = []
         self.ai_translator = None
         self.prompt_manager = PromptManager(settings_paths=self.ai_config.get("paths", {}))
+        
+        # 初始化語言管理器
+        from modules.language_manager import LanguageManager
+        self.language_manager = LanguageManager()
+        
+        # 從父視窗獲取語言管理器（如果存在），否則使用預設
+        if parent and hasattr(parent, 'language_manager'):
+            self.language_manager = parent.language_manager
 
         # 臨時prompt設定（僅用於本次翻譯）
         self.temp_prompts = {
@@ -218,7 +235,7 @@ class AITranslationEditorDialog(QDialog):
             "character_info": ai_config.get("prompts", {}).get("character_info", "無特殊設定")
         }
 
-        self.setWindowTitle("AI翻譯編輯器 v2.0")
+        self.setWindowTitle(self.language_manager.get_text("ai_translation_editor_title", "AI翻譯編輯器 v2.0"))
         self.resize(600, 800)
         self.setModal(True)
 
@@ -230,7 +247,7 @@ class AITranslationEditorDialog(QDialog):
         try:
             self.ai_translator = AITranslator(self.ai_config)
         except Exception as e:
-            QMessageBox.warning(self, "警告", f"AI翻譯器初始化失敗: {str(e)}")
+            QMessageBox.warning(self, self.language_manager.get_text("warning_title", "Warning"), self.language_manager.get_text("ai_translator_init_error", "AI translator initialization failed: {error}").format(error=str(e)))
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -241,33 +258,33 @@ class AITranslationEditorDialog(QDialog):
         # 翻譯分頁
         translation_tab = QWidget()
         self.setup_translation_tab(translation_tab)
-        self.tab_widget.addTab(translation_tab, "翻譯編輯")
+        self.tab_widget.addTab(translation_tab, self.language_manager.get_text("ai_translation_editor_translation_tab", "翻譯編輯"))
         
         # 設定資訊分頁（可編輯）
         settings_info_tab = QWidget()
         self.setup_settings_info_tab(settings_info_tab)
-        self.tab_widget.addTab(settings_info_tab, "設定資訊")
+        self.tab_widget.addTab(settings_info_tab, self.language_manager.get_text("ai_translation_editor_settings_tab", "設定資訊"))
         
         # Prompt設定分頁（臨時調整）
         prompt_tab = QWidget()
         self.setup_prompt_tab(prompt_tab)
-        self.tab_widget.addTab(prompt_tab, "Prompt調整")
+        self.tab_widget.addTab(prompt_tab, self.language_manager.get_text("ai_translation_editor_prompt_tab", "Prompt調整"))
         
         layout.addWidget(self.tab_widget)
         
         # 底部按鈕
         button_layout = QHBoxLayout()
         
-        self.test_api_btn = QPushButton("測試API連線")
+        self.test_api_btn = QPushButton(self.language_manager.get_text("ai_translation_editor_test_api", "測試API連線"))
         self.test_api_btn.clicked.connect(self.test_api_connection)
         
-        self.auto_translate_btn = QPushButton("AI自動翻譯")
+        self.auto_translate_btn = QPushButton(self.language_manager.get_text("ai_translation_editor_auto_translate", "AI自動翻譯"))
         self.auto_translate_btn.clicked.connect(self.start_auto_translation)
 
-        self.save_btn = QPushButton("儲存翻譯")
+        self.save_btn = QPushButton(self.language_manager.get_text("ai_translation_editor_save", "儲存翻譯"))
         self.save_btn.clicked.connect(self.handle_save_action)
         
-        self.cancel_btn = QPushButton("取消")
+        self.cancel_btn = QPushButton(self.language_manager.get_text("cancel_button", "取消"))
         self.cancel_btn.clicked.connect(self.reject)
         
         button_layout.addWidget(self.test_api_btn)
@@ -284,7 +301,7 @@ class AITranslationEditorDialog(QDialog):
         layout.addWidget(self.progress_bar)
         
         # 狀態標籤
-        self.status_label = QLabel("就緒")
+        self.status_label = QLabel(self.language_manager.get_text("status_ready", "Ready"))
         layout.addWidget(self.status_label)
 
     def setup_translation_tab(self, tab):
@@ -292,8 +309,8 @@ class AITranslationEditorDialog(QDialog):
 
         # 檔案資訊
         info_layout = QHBoxLayout()
-        source_text = f"來源檔案: {Path(self.source_file).name}" if self.source_file else "來源檔案: 尚未指定"
-        target_text = f"目標檔案: {Path(self.target_file).name}" if self.target_file else "目標檔案: 尚未指定"
+        source_text = f"{self.language_manager.get_text('ai_translation_editor_source_file', '來源檔案:')} {Path(self.source_file).name}" if self.source_file else f"{self.language_manager.get_text('ai_translation_editor_source_file', '來源檔案:')} {self.language_manager.get_text('ai_translation_editor_not_specified', '尚未指定')}"
+        target_text = f"{self.language_manager.get_text('ai_translation_editor_target_file', '目標檔案:')} {Path(self.target_file).name}" if self.target_file else f"{self.language_manager.get_text('ai_translation_editor_target_file', '目標檔案:')} {self.language_manager.get_text('ai_translation_editor_not_specified', '尚未指定')}"
         self.source_info_label = QLabel(source_text)
         self.target_info_label = QLabel(target_text)
         info_layout.addWidget(self.source_info_label)
@@ -304,7 +321,7 @@ class AITranslationEditorDialog(QDialog):
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
         # 原文區域
-        original_group = QGroupBox("原文")
+        original_group = QGroupBox(self.language_manager.get_text('ai_translation_editor_original_text', '原文'))
         original_layout = QVBoxLayout(original_group)
         self.original_text = QTextEdit()
         self.original_text.setReadOnly(True)
@@ -314,14 +331,14 @@ class AITranslationEditorDialog(QDialog):
         splitter.addWidget(original_group)
 
         # 翻譯區域
-        translation_group = QGroupBox("翻譯結果")
+        translation_group = QGroupBox(self.language_manager.get_text('ai_translation_editor_translation_result', '翻譯結果'))
         translation_layout = QVBoxLayout(translation_group)
 
         # 翻譯控制按鈕
         trans_control_layout = QHBoxLayout()
-        self.clear_translation_btn = QPushButton("清空翻譯")
+        self.clear_translation_btn = QPushButton(self.language_manager.get_text('ai_translation_editor_clear_translation', '清空翻譯'))
         self.clear_translation_btn.clicked.connect(self.clear_translation)
-        self.reload_btn = QPushButton("重新載入")
+        self.reload_btn = QPushButton(self.language_manager.get_text('ai_translation_editor_reload', '重新載入'))
         self.reload_btn.clicked.connect(self.load_source_content)
         trans_control_layout.addWidget(self.clear_translation_btn)
         trans_control_layout.addWidget(self.reload_btn)
@@ -337,8 +354,8 @@ class AITranslationEditorDialog(QDialog):
 
         # 翻譯統計
         stats_layout = QHBoxLayout()
-        self.line_count_label = QLabel("行數: 0")
-        self.char_count_label = QLabel("字元數: 0")
+        self.line_count_label = QLabel(self.language_manager.get_text("line_count", "Lines: {count}").format(count=0))
+        self.char_count_label = QLabel(self.language_manager.get_text("char_count", "Characters: {count}").format(count=0))
         stats_layout.addWidget(self.line_count_label)
         stats_layout.addWidget(self.char_count_label)
         stats_layout.addStretch()
@@ -368,23 +385,23 @@ class AITranslationEditorDialog(QDialog):
 
         self.translation_text.setReadOnly(not translation_enabled)
         if hasattr(self.translation_text, "setPlaceholderText"):
-            placeholder = "" if translation_enabled else "設定模式：需在流程中載入字幕後才能進行翻譯。"
+            placeholder = "" if translation_enabled else self.language_manager.get_text("settings_mode_placeholder", "Settings mode: No subtitle content loaded currently.")
             self.translation_text.setPlaceholderText(placeholder)
 
         if translation_enabled:
             self.save_btn.setText("儲存翻譯")
-            if self.status_label.text().startswith("設定模式"):
-                self.status_label.setText("就緒")
+            if self.status_label.text().startswith(self.language_manager.get_text("settings_mode", "Settings mode")):
+                self.status_label.setText(self.language_manager.get_text("status_ready", "Ready"))
         else:
             self.save_btn.setText("完成")
-            self.status_label.setText("設定模式：可直接調整 AI 設定與 Prompt")
+            self.status_label.setText(self.language_manager.get_text("settings_mode_title", "Settings mode: Can directly adjust AI settings and Prompt"))
 
     def setup_settings_info_tab(self, tab):
         """設定資訊分頁 - 多組AI設定管理"""
         layout = QVBoxLayout(tab)
 
         # 說明標籤
-        info_label = QLabel("管理多組AI翻譯設定。每組設定包含API資訊和模型資訊，可自由組合使用。")
+        info_label = QLabel(self.language_manager.get_text("ai_settings_management_info", "Manage multiple AI translation settings. Each setting group contains API information and model information, which can be freely combined."))
         info_label.setStyleSheet("color: #666; font-style: italic; margin: 10px;")
         layout.addWidget(info_label)
 
@@ -392,20 +409,20 @@ class AITranslationEditorDialog(QDialog):
         settings_selection_layout = QHBoxLayout()
 
         # API設定選擇
-        api_group = QGroupBox("API設定")
+        api_group = QGroupBox(self.language_manager.get_text("ai_settings_group_title", "API Settings"))
         api_layout = QVBoxLayout(api_group)
 
         api_select_layout = QHBoxLayout()
-        api_select_layout.addWidget(QLabel("選擇API設定:"))
+        api_select_layout.addWidget(QLabel(self.language_manager.get_text("select_api_setting", "Select API Setting:")))
         self.api_settings_combo = QComboBox()
         self.api_settings_combo.currentTextChanged.connect(self.on_api_setting_changed)
         api_select_layout.addWidget(self.api_settings_combo)
 
-        self.new_api_btn = QPushButton("新增API")
+        self.new_api_btn = QPushButton(self.language_manager.get_text("new_api_setting", "New API"))
         self.new_api_btn.clicked.connect(self.new_api_setting)
         api_select_layout.addWidget(self.new_api_btn)
 
-        self.delete_api_btn = QPushButton("刪除")
+        self.delete_api_btn = QPushButton(self.language_manager.get_text("delete_api_setting", "Delete"))
         self.delete_api_btn.clicked.connect(self.delete_api_setting)
         api_select_layout.addWidget(self.delete_api_btn)
 
@@ -414,37 +431,37 @@ class AITranslationEditorDialog(QDialog):
         # API設定欄位
         self.api_provider_edit = QLineEdit()
         self.api_provider_edit.setFixedWidth(int(self.width() * 0.8))
-        api_layout.addWidget(QLabel("API供應商:"))
+        api_layout.addWidget(QLabel(self.language_manager.get_text("api_provider_field", "API Provider:")))
         api_layout.addWidget(self.api_provider_edit)
 
         self.api_url_edit = QLineEdit()
         self.api_url_edit.setFixedWidth(int(self.width() * 0.8))
-        api_layout.addWidget(QLabel("API網址:"))
+        api_layout.addWidget(QLabel(self.language_manager.get_text("api_url_field", "API URL:")))
         api_layout.addWidget(self.api_url_edit)
 
         self.api_key_edit = QLineEdit()
         self.api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.api_key_edit.setFixedWidth(int(self.width() * 0.8))
-        api_layout.addWidget(QLabel("API金鑰:"))
+        api_layout.addWidget(QLabel(self.language_manager.get_text("api_key_field", "API Key:")))
         api_layout.addWidget(self.api_key_edit)
 
         settings_selection_layout.addWidget(api_group)
 
         # 模型設定選擇
-        model_group = QGroupBox("模型設定")
+        model_group = QGroupBox(self.language_manager.get_text("model_settings_group_title", "Model Settings"))
         model_layout = QVBoxLayout(model_group)
 
         model_select_layout = QHBoxLayout()
-        model_select_layout.addWidget(QLabel("選擇模型設定:"))
+        model_select_layout.addWidget(QLabel(self.language_manager.get_text("select_model_setting", "Select Model Setting:")))
         self.model_settings_combo = QComboBox()
         self.model_settings_combo.currentTextChanged.connect(self.on_model_setting_changed)
         model_select_layout.addWidget(self.model_settings_combo)
 
-        self.new_model_btn = QPushButton("新增模型")
+        self.new_model_btn = QPushButton(self.language_manager.get_text("new_model_setting", "New Model"))
         self.new_model_btn.clicked.connect(self.new_model_setting)
         model_select_layout.addWidget(self.new_model_btn)
 
-        self.delete_model_btn = QPushButton("刪除")
+        self.delete_model_btn = QPushButton(self.language_manager.get_text("delete_model_setting", "Delete"))
         self.delete_model_btn.clicked.connect(self.delete_model_setting)
         model_select_layout.addWidget(self.delete_model_btn)
 
@@ -453,7 +470,7 @@ class AITranslationEditorDialog(QDialog):
         # 模型設定欄位
         self.model_edit = QLineEdit()
         self.model_edit.setFixedWidth(int(self.width() * 0.8))
-        model_layout.addWidget(QLabel("模型:"))
+        model_layout.addWidget(QLabel(self.language_manager.get_text("model_field", "Model:")))
         model_layout.addWidget(self.model_edit)
 
         settings_selection_layout.addWidget(model_group)
@@ -461,51 +478,51 @@ class AITranslationEditorDialog(QDialog):
         layout.addLayout(settings_selection_layout)
 
         # 翻譯參數設定
-        params_group = QGroupBox("翻譯參數")
+        params_group = QGroupBox(self.language_manager.get_text("translation_params_group_title", "Translation Parameters"))
         params_layout = QFormLayout(params_group)
 
         # 語言設定
         self.source_language_edit = QLineEdit(self.ai_config.get("source_language", ""))
         self.source_language_edit.setFixedWidth(int(self.width() * 0.8))
-        params_layout.addRow("來源語言:", self.source_language_edit)
+        params_layout.addRow(self.language_manager.get_text("source_language_field", "Source Language:"), self.source_language_edit)
 
         self.target_language_edit = QLineEdit(self.ai_config.get("target_language", ""))
         self.target_language_edit.setFixedWidth(int(self.width() * 0.8))
-        params_layout.addRow("目標語言:", self.target_language_edit)
+        params_layout.addRow(self.language_manager.get_text("target_language_field", "Target Language:"), self.target_language_edit)
 
         # 翻譯參數
         self.batch_size_spinbox = QSpinBox()
         self.batch_size_spinbox.setRange(1, 100)
         self.batch_size_spinbox.setValue(self.ai_config.get("batch_size", 10))
-        params_layout.addRow("批次大小:", self.batch_size_spinbox)
+        params_layout.addRow(self.language_manager.get_text("batch_size_field", "Batch Size:"), self.batch_size_spinbox)
 
         self.max_concurrent_requests_spinbox = QSpinBox()
         self.max_concurrent_requests_spinbox.setRange(1, 10)
         self.max_concurrent_requests_spinbox.setValue(self.ai_config.get("max_concurrent_requests", 3))
-        params_layout.addRow("最大並行請求數:", self.max_concurrent_requests_spinbox)
+        params_layout.addRow(self.language_manager.get_text("max_concurrent_requests_field", "Max Concurrent Requests:"), self.max_concurrent_requests_spinbox)
 
-        self.enable_validation_checkbox = QCheckBox("啟用翻譯結果驗證")
+        self.enable_validation_checkbox = QCheckBox(self.language_manager.get_text("enable_validation_field", "Enable Translation Validation"))
         self.enable_validation_checkbox.setChecked(self.ai_config.get("enable_validation", False))
-        params_layout.addRow("翻譯結果驗證:", self.enable_validation_checkbox)
+        params_layout.addRow(self.language_manager.get_text("translation_validation", "Translation Validation:"), self.enable_validation_checkbox)
 
         self.max_retries_spinbox = QSpinBox()
         self.max_retries_spinbox.setRange(0, 5)
         self.max_retries_spinbox.setValue(self.ai_config.get("max_retries", 3))
-        params_layout.addRow("最大重試次數:", self.max_retries_spinbox)
+        params_layout.addRow(self.language_manager.get_text("max_retries_field", "Max Retries:"), self.max_retries_spinbox)
 
         self.retry_delay_spinbox = QSpinBox()
         self.retry_delay_spinbox.setRange(1, 10)
         self.retry_delay_spinbox.setValue(self.ai_config.get("retry_delay", 2))
-        params_layout.addRow("重試延遲(秒):", self.retry_delay_spinbox)
+        params_layout.addRow(self.language_manager.get_text("retry_delay_field", "Retry Delay (seconds):"), self.retry_delay_spinbox)
 
         layout.addWidget(params_group)
 
         # 控制按鈕
         button_layout = QHBoxLayout()
-        save_settings_btn = QPushButton("儲存設定")
+        save_settings_btn = QPushButton(self.language_manager.get_text("save_settings", "Save Settings"))
         save_settings_btn.clicked.connect(self.save_ai_settings)
 
-        reset_settings_btn = QPushButton("重置")
+        reset_settings_btn = QPushButton(self.language_manager.get_text("reset_settings", "Reset"))
         reset_settings_btn.clicked.connect(self.reset_ai_settings)
 
         button_layout.addWidget(save_settings_btn)
@@ -522,27 +539,27 @@ class AITranslationEditorDialog(QDialog):
         layout = QVBoxLayout(tab)
 
         # 說明標籤
-        info_label = QLabel("自定義Prompt模板管理。選擇模板進行編輯，或新增/刪除模板。")
+        info_label = QLabel(self.language_manager.get_text("prompt_template_management_info", "Custom Prompt template management. Select a template to edit, or add/delete templates."))
         info_label.setStyleSheet("color: #666; font-style: italic; margin: 10px;")
         layout.addWidget(info_label)
 
         # 模板管理控制
         template_control_layout = QHBoxLayout()
-        template_control_layout.addWidget(QLabel("模板選擇:"))
+        template_control_layout.addWidget(QLabel(self.language_manager.get_text("select_template", "Template Selection:")))
 
         self.template_combo = QComboBox()
         self.template_combo.currentTextChanged.connect(self.on_template_changed)
         template_control_layout.addWidget(self.template_combo)
 
-        self.new_template_btn = QPushButton("新增")
+        self.new_template_btn = QPushButton(self.language_manager.get_text("new_template", "New"))
         self.new_template_btn.clicked.connect(self.new_template)
         template_control_layout.addWidget(self.new_template_btn)
 
-        self.delete_template_btn = QPushButton("刪除")
+        self.delete_template_btn = QPushButton(self.language_manager.get_text("delete_template", "Delete"))
         self.delete_template_btn.clicked.connect(self.delete_template)
         template_control_layout.addWidget(self.delete_template_btn)
 
-        self.save_template_btn = QPushButton("儲存")
+        self.save_template_btn = QPushButton(self.language_manager.get_text("save_template", "Save"))
         self.save_template_btn.clicked.connect(self.save_template)
         template_control_layout.addWidget(self.save_template_btn)
 
@@ -553,7 +570,7 @@ class AITranslationEditorDialog(QDialog):
         main_splitter = QSplitter(Qt.Orientation.Vertical)
 
         # System Prompt區域 (2/5)
-        system_group = QGroupBox("System Prompt")
+        system_group = QGroupBox(self.language_manager.get_text("system_prompt_group", "System Prompt"))
         system_layout = QVBoxLayout(system_group)
         self.system_prompt_editor = QTextEdit()
         self.system_prompt_editor.setFont(QFont("Consolas", 10))
@@ -561,7 +578,7 @@ class AITranslationEditorDialog(QDialog):
         main_splitter.addWidget(system_group)
 
         # User Prompt區域 (2/5)
-        user_group = QGroupBox("User Prompt")
+        user_group = QGroupBox(self.language_manager.get_text("user_prompt_group", "User Prompt"))
         user_layout = QVBoxLayout(user_group)
         self.user_prompt_editor = QTextEdit()
         self.user_prompt_editor.setFont(QFont("Consolas", 10))
@@ -569,7 +586,7 @@ class AITranslationEditorDialog(QDialog):
         main_splitter.addWidget(user_group)
 
         # 變數參考區域 (1/5)
-        variables_group = QGroupBox("變數參考")
+        variables_group = QGroupBox(self.language_manager.get_text("variables_reference", "Variables Reference"))
         variables_layout = QVBoxLayout(variables_group)
 
         variables_text = QTextEdit()
@@ -590,10 +607,10 @@ class AITranslationEditorDialog(QDialog):
         # Prompt控制按鈕
         prompt_control_layout = QHBoxLayout()
 
-        self.apply_prompt_btn = QPushButton("套用調整")
+        self.apply_prompt_btn = QPushButton(self.language_manager.get_text("apply_adjustment", "Apply Adjustment"))
         self.apply_prompt_btn.clicked.connect(self.apply_prompt_changes)
 
-        self.reset_prompt_btn = QPushButton("重置")
+        self.reset_prompt_btn = QPushButton(self.language_manager.get_text("reset_prompt", "Reset"))
         self.reset_prompt_btn.clicked.connect(self.reset_prompts)
 
         prompt_control_layout.addWidget(self.apply_prompt_btn)
@@ -640,10 +657,10 @@ class AITranslationEditorDialog(QDialog):
             if self.ai_config.get("enabled", False):
                 self.ai_translator = AITranslator(self.ai_config)
             
-            QMessageBox.information(self, "成功", "AI翻譯設定已儲存")
+            QMessageBox.information(self, self.language_manager.get_text("confirm_button", "Confirm"), self.language_manager.get_text("settings_saved_success", "AI settings saved"))
             
         except Exception as e:
-            QMessageBox.critical(self, "錯誤", f"儲存設定失敗: {str(e)}")
+            QMessageBox.critical(self, self.language_manager.get_text("error_title", "Error"), self.language_manager.get_text("save_ai_settings_error", "Failed to save AI settings: {error}").format(error=str(e)))
     
     def reset_settings(self):
         """重置設定為預設值"""
@@ -667,23 +684,23 @@ class AITranslationEditorDialog(QDialog):
             self.video_type_edit.clear()
             self.character_info_edit.clear()
             
-            QMessageBox.information(self, "成功", "AI翻譯設定已重置")
+            QMessageBox.information(self, self.language_manager.get_text("confirm_button", "Confirm"), self.language_manager.get_text("settings_reset_success", "AI settings reset"))
             
         except Exception as e:
-            QMessageBox.critical(self, "錯誤", f"重置設定失敗: {str(e)}")
+            QMessageBox.critical(self, self.language_manager.get_text("error_title", "Error"), self.language_manager.get_text("reset_ai_settings_error", "Failed to reset AI settings: {error}").format(error=str(e)))
 
     def load_source_content(self):
         """載入來源檔案內容"""
         if not self.source_file or not Path(self.source_file).exists():
-            placeholder = "設定模式：目前沒有載入字幕內容。" if self.mode == "settings" else "找不到來源檔案，請確認 2C 流程輸入。"
+            placeholder = self.language_manager.get_text("settings_mode_placeholder", "Settings mode: No subtitle content loaded currently.") if self.mode == "settings" else self.language_manager.get_text("source_file_not_found", "Source file not found, please confirm 2C process input.")
             self.original_text.setPlainText(placeholder)
             self.original_lines = []
             self.line_count_label.setText("行數: 0")
             self.char_count_label.setText("字元數: 0")
             if self.mode == "settings":
-                self.status_label.setText("設定模式：可直接調整 AI 設定與 Prompt")
+                self.status_label.setText(self.language_manager.get_text("settings_mode_title", "Settings mode: Can directly adjust AI settings and Prompt"))
             else:
-                self.status_label.setText("警告：找不到來源檔案")
+                self.status_label.setText(self.language_manager.get_text("source_file_not_found", "Source file not found, please confirm 2C process input."))
             self.configure_mode_ui()
             return
 
@@ -698,10 +715,10 @@ class AITranslationEditorDialog(QDialog):
             self.line_count_label.setText(f"行數: {len(self.original_lines)}")
             self.char_count_label.setText(f"字元數: {len(content)}")
 
-            self.status_label.setText("來源檔案載入完成")
+            self.status_label.setText(self.language_manager.get_text("load_source_error", "Failed to load source file: {error}").format(error=""))
 
         except Exception as e:
-            QMessageBox.critical(self, "錯誤", f"載入來源檔案失敗: {str(e)}")
+            QMessageBox.critical(self, self.language_manager.get_text("error_title", "Error"), self.language_manager.get_text("load_source_error", "Failed to load source file: {error}").format(error=str(e)))
         finally:
             self.configure_mode_ui()
 
@@ -722,12 +739,12 @@ class AITranslationEditorDialog(QDialog):
             # 重新初始化翻譯器
             if self.ai_config.get("enabled", False):
                 self.ai_translator = AITranslator(self.ai_config)
-                self.status_label.setText("Prompt調整已套用")
+                self.status_label.setText(self.language_manager.get_text("prompt_applied", "Prompt adjustment applied"))
             else:
-                self.status_label.setText("AI翻譯未啟用")
+                self.status_label.setText(self.language_manager.get_text("ai_translation_disabled", "AI translation not enabled"))
 
         except Exception as e:
-            QMessageBox.warning(self, "警告", f"套用Prompt調整失敗: {str(e)}")
+            QMessageBox.warning(self, self.language_manager.get_text("warning_title", "Warning"), self.language_manager.get_text("apply_prompt_error", "Failed to apply prompt adjustment: {error}").format(error=str(e)))
 
     def reset_prompts(self):
         """重置Prompt為原始設定"""
@@ -759,46 +776,46 @@ class AITranslationEditorDialog(QDialog):
                 self.template_combo.setCurrentIndex(index)
                 self.on_template_changed()
 
-            self.status_label.setText("Prompt已重置為原始設定")
+            self.status_label.setText(self.language_manager.get_text("prompt_reset", "Prompt reset to original settings"))
 
         except Exception as e:
-            QMessageBox.warning(self, "警告", f"重置Prompt失敗: {str(e)}")
+            QMessageBox.warning(self, self.language_manager.get_text("warning_title", "Warning"), self.language_manager.get_text("reset_prompt_error", "Failed to reset prompt: {error}").format(error=str(e)))
 
     def test_api_connection(self):
         """測試API連線"""
         if not self.ai_translator:
-            QMessageBox.warning(self, "警告", "AI翻譯未啟用或初始化失敗")
+            QMessageBox.warning(self, self.language_manager.get_text("warning_title", "Warning"), self.language_manager.get_text("ai_translation_disabled", "AI translation not enabled"))
             return
 
-        self.status_label.setText("測試API連線中...")
+        self.status_label.setText(self.language_manager.get_text("api_connection_test_disabled", "Testing API connection..."))
         self.test_api_btn.setEnabled(False)
 
         try:
             success, message = self.ai_translator.validate_api_connection()
             if success:
-                QMessageBox.information(self, "成功", message)
-                self.status_label.setText("API連線測試成功")
+                QMessageBox.information(self, self.language_manager.get_text("success_title", "成功"), message)
+                self.status_label.setText(self.language_manager.get_text("api_connection_test_success", "API connection test successful: {message}").format(message=""))
             else:
-                QMessageBox.warning(self, "失敗", message)
-                self.status_label.setText("API連線測試失敗")
+                QMessageBox.warning(self, self.language_manager.get_text("failure_title", "失敗"), message)
+                self.status_label.setText(self.language_manager.get_text("api_connection_test_failure", "API connection test failed: {message}").format(message=""))
         except Exception as e:
-            QMessageBox.critical(self, "錯誤", f"API連線測試錯誤: {str(e)}")
-            self.status_label.setText("API連線測試錯誤")
+            QMessageBox.critical(self, self.language_manager.get_text("error_title", "錯誤"), self.language_manager.get_text("api_connection_test_error_detail", "API連線測試錯誤: {error}").format(error=str(e)))
+            self.status_label.setText(self.language_manager.get_text("api_connection_test_error", "API connection test error: {error}").format(error=""))
         finally:
             self.test_api_btn.setEnabled(True)
 
     def start_auto_translation(self):
         """開始自動翻譯"""
         if self.mode != "translation":
-            QMessageBox.information(self, "提示", "設定模式下無法執行自動翻譯。")
+            QMessageBox.information(self, self.language_manager.get_text("confirm_button", "Confirm"), self.language_manager.get_text("settings_mode", "Settings mode: Can directly adjust AI settings and Prompt"))
             return
 
         if not self.ai_config.get("enabled", False):
-            QMessageBox.warning(self, "警告", "AI翻譯未啟用")
+            QMessageBox.warning(self, self.language_manager.get_text("warning_title", "Warning"), self.language_manager.get_text("ai_translation_disabled", "AI translation not enabled"))
             return
 
         if not self.original_lines:
-            QMessageBox.warning(self, "警告", "沒有可翻譯的內容")
+            QMessageBox.warning(self, self.language_manager.get_text("warning_title", "Warning"), self.language_manager.get_text("no_content_to_translate", "No content to translate"))
             return
 
         # 準備上下文資訊
@@ -811,7 +828,7 @@ class AITranslationEditorDialog(QDialog):
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)  # 不確定進度
         self.auto_translate_btn.setEnabled(False)
-        self.status_label.setText("AI翻譯進行中...")
+        self.status_label.setText(self.language_manager.get_text("translation_in_progress", "AI translation in progress..."))
 
         # 建立獨立的進度窗口
         self.progress_window = TranslationProgressWindow(self)
@@ -838,34 +855,34 @@ class AITranslationEditorDialog(QDialog):
 
         self.progress_bar.setVisible(False)
         self.auto_translate_btn.setEnabled(True)
-        self.status_label.setText("AI翻譯完成")
+        self.status_label.setText(self.language_manager.get_text("translation_completed", "AI translation completed, please check the results"))
 
         # 關閉進度窗口
         if hasattr(self, 'progress_window') and self.progress_window:
             self.progress_window.close()
 
-        QMessageBox.information(self, "完成", "AI翻譯已完成，請檢查翻譯結果")
+        QMessageBox.information(self, self.language_manager.get_text("confirm_button", "Confirm"), self.language_manager.get_text("translation_completed", "AI translation completed, please check the results"))
 
     def on_translation_error(self, error_message: str):
         """翻譯錯誤"""
         self.progress_bar.setVisible(False)
         self.auto_translate_btn.setEnabled(True)
-        self.status_label.setText("翻譯失敗")
+        self.status_label.setText(self.language_manager.get_text("translation_error", "Translation error: {error}").format(error=""))
 
         # 關閉進度窗口
         if hasattr(self, 'progress_window') and self.progress_window:
             self.progress_window.close()
 
-        QMessageBox.critical(self, "翻譯錯誤", error_message)
+        QMessageBox.critical(self, self.language_manager.get_text("error_title", "Error"), error_message)
 
     def clear_translation(self):
         """清空翻譯"""
         self.translation_text.clear()
         self.translated_lines = []
         if self.mode == "translation":
-            self.status_label.setText("翻譯已清空")
+            self.status_label.setText(self.language_manager.get_text("clear_translation_done", "Translation cleared"))
         else:
-            self.status_label.setText("設定模式：翻譯區內容已清空")
+            self.status_label.setText(self.language_manager.get_text("settings_mode_clear", "Settings mode: Translation area content cleared"))
 
     def handle_save_action(self):
         if self.mode == "translation":
@@ -880,7 +897,7 @@ class AITranslationEditorDialog(QDialog):
             return
 
         if not self.target_file:
-            QMessageBox.warning(self, "警告", "目標檔案未設定，無法儲存翻譯")
+            QMessageBox.warning(self, self.language_manager.get_text("warning_title", "Warning"), self.language_manager.get_text("no_translation_to_save", "No translation content to save"))
             return
 
         try:
@@ -888,7 +905,7 @@ class AITranslationEditorDialog(QDialog):
             translation_content = self.translation_text.toPlainText()
 
             if not translation_content.strip():
-                QMessageBox.warning(self, "警告", "沒有翻譯內容可儲存")
+                QMessageBox.warning(self, self.language_manager.get_text("warning_title", "Warning"), self.language_manager.get_text("no_translation_to_save", "No translation content to save"))
                 return
 
             # 確保目標目錄存在
@@ -899,12 +916,12 @@ class AITranslationEditorDialog(QDialog):
             with open(self.target_file, "w", encoding="utf-8") as f:
                 f.write(translation_content)
 
-            self.status_label.setText("翻譯已儲存")
-            QMessageBox.information(self, "成功", f"翻譯結果已儲存到: {self.target_file}")
+            self.status_label.setText(self.language_manager.get_text("translation_saved_to", "Translation saved to: {path}").format(path=""))
+            QMessageBox.information(self, self.language_manager.get_text("confirm_button", "Confirm"), self.language_manager.get_text("translation_saved_to", "Translation saved to: {path}").format(path=self.target_file))
             self.accept()
 
         except Exception as e:
-            QMessageBox.critical(self, "錯誤", f"儲存翻譯失敗: {str(e)}")
+            QMessageBox.critical(self, self.language_manager.get_text("error_title", "Error"), self.language_manager.get_text("save_translation_error", "Failed to save translation: {error}").format(error=str(e)))
 
     def update_template_list(self):
         """更新模板列表"""
@@ -950,7 +967,7 @@ class AITranslationEditorDialog(QDialog):
                 self.system_prompt_editor.setPlainText(system_prompt)
                 self.user_prompt_editor.setPlainText(user_prompt)
         except Exception as e:
-            QMessageBox.warning(self, "警告", f"載入模板失敗: {str(e)}")
+            QMessageBox.warning(self, self.language_manager.get_text("warning_title", "Warning"), self.language_manager.get_text("load_api_prompt_error", "Failed to load Prompt templates: {error}").format(error=str(e)))
 
     def load_ai_settings(self):
         """載入AI設定"""
@@ -978,7 +995,7 @@ class AITranslationEditorDialog(QDialog):
                 self.on_model_setting_changed()
 
         except Exception as e:
-            QMessageBox.warning(self, "警告", f"載入AI設定失敗: {str(e)}")
+            QMessageBox.warning(self, self.language_manager.get_text("warning_title", "Warning"), self.language_manager.get_text("load_api_settings_error", "Failed to load AI settings: {error}").format(error=str(e)))
 
     def _sync_config_from_ui(self):
         """從UI同步設定到ai_config"""
@@ -1020,7 +1037,7 @@ class AITranslationEditorDialog(QDialog):
                 self.ai_translator = AITranslator(self.ai_config)
 
         except Exception as e:
-            QMessageBox.warning(self, "警告", f"同步設定失敗: {str(e)}")
+            QMessageBox.warning(self, self.language_manager.get_text("warning_title", "Warning"), self.language_manager.get_text("load_api_settings_error", "Failed to load AI settings: {error}").format(error=str(e)))
 
     def save_ai_settings(self):
         """儲存AI設定"""
@@ -1058,19 +1075,19 @@ class AITranslationEditorDialog(QDialog):
             # 同步設定到記憶體並重新初始化翻譯器
             self._sync_config_from_ui()
 
-            QMessageBox.information(self, "成功", "AI設定已儲存")
+            QMessageBox.information(self, self.language_manager.get_text("success_title", "成功"), self.language_manager.get_text("ai_settings_saved", "AI設定已儲存"))
 
         except Exception as e:
-            QMessageBox.critical(self, "錯誤", f"儲存AI設定失敗: {str(e)}")
+            QMessageBox.critical(self, self.language_manager.get_text("error_title", "Error"), self.language_manager.get_text("save_ai_settings_error", "Failed to save AI settings: {error}").format(error=str(e)))
 
     def reset_ai_settings(self):
         """重置AI設定"""
         try:
             # 重新載入設定
             self.load_ai_settings()
-            QMessageBox.information(self, "成功", "AI設定已重置")
+            QMessageBox.information(self, self.language_manager.get_text("success_title", "成功"), self.language_manager.get_text("ai_settings_reset", "AI設定已重置"))
         except Exception as e:
-            QMessageBox.critical(self, "錯誤", f"重置AI設定失敗: {str(e)}")
+            QMessageBox.critical(self, self.language_manager.get_text("error_title", "Error"), self.language_manager.get_text("reset_ai_settings_error", "Failed to reset AI settings: {error}").format(error=str(e)))
 
     def on_api_setting_changed(self):
         """API設定改變"""
@@ -1092,7 +1109,7 @@ class AITranslationEditorDialog(QDialog):
             self._sync_config_from_ui()
 
         except Exception as e:
-            QMessageBox.warning(self, "警告", f"載入API設定失敗: {str(e)}")
+            QMessageBox.warning(self, self.language_manager.get_text("warning_title", "Warning"), self.language_manager.get_text("load_api_settings_error", "Failed to load AI settings: {error}").format(error=str(e)))
 
     def on_model_setting_changed(self):
         """模型設定改變"""
@@ -1112,11 +1129,11 @@ class AITranslationEditorDialog(QDialog):
             self._sync_config_from_ui()
 
         except Exception as e:
-            QMessageBox.warning(self, "警告", f"載入模型設定失敗: {str(e)}")
+            QMessageBox.warning(self, self.language_manager.get_text("warning_title", "Warning"), self.language_manager.get_text("load_api_settings_error", "Failed to load AI settings: {error}").format(error=str(e)))
 
     def new_api_setting(self):
         """新增API設定"""
-        name, ok = QInputDialog.getText(self, "新增API設定", "輸入API設定名稱:")
+        name, ok = QInputDialog.getText(self, self.language_manager.get_text("new_api_setting_name", "Enter API setting name:"), self.language_manager.get_text("new_api_setting_name", "Enter API setting name:"))
         if ok and name.strip():
             try:
                 with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
@@ -1144,18 +1161,18 @@ class AITranslationEditorDialog(QDialog):
                     self.api_settings_combo.setCurrentIndex(index)
 
             except Exception as e:
-                QMessageBox.critical(self, "錯誤", f"新增API設定失敗: {str(e)}")
+                QMessageBox.critical(self, self.language_manager.get_text("error_title", "Error"), self.language_manager.get_text("save_ai_settings_error", "Failed to save AI settings: {error}").format(error=str(e)))
 
     def delete_api_setting(self):
         """刪除API設定"""
         current_api = self.api_settings_combo.currentText()
 
         if not current_api:
-            QMessageBox.warning(self, "警告", "請先選擇要刪除的API設定")
+            QMessageBox.warning(self, self.language_manager.get_text("warning_title", "Warning"), self.language_manager.get_text("select_api_setting", "Select API Setting:"))
             return
 
-        reply = QMessageBox.question(self, "確認刪除", f"確定要刪除API設定 '{current_api}' 嗎？",
-                                   QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        reply = QMessageBox.question(self, self.language_manager.get_text("confirm_delete_api", "Are you sure you want to delete API setting '{name}'?").format(name=current_api), self.language_manager.get_text("confirm_delete_api", "Are you sure you want to delete API setting '{name}'?").format(name=current_api),
+                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
 
         if reply == QMessageBox.StandardButton.Yes:
             try:
@@ -1171,11 +1188,11 @@ class AITranslationEditorDialog(QDialog):
                     self.load_ai_settings()
 
             except Exception as e:
-                QMessageBox.critical(self, "錯誤", f"刪除API設定失敗: {str(e)}")
+                QMessageBox.critical(self, self.language_manager.get_text("error_title", "Error"), self.language_manager.get_text("save_ai_settings_error", "Failed to save AI settings: {error}").format(error=str(e)))
 
     def new_model_setting(self):
         """新增模型設定"""
-        name, ok = QInputDialog.getText(self, "新增模型設定", "輸入模型設定名稱:")
+        name, ok = QInputDialog.getText(self, self.language_manager.get_text("new_model_setting_name", "Enter model setting name:"), self.language_manager.get_text("new_model_setting_name", "Enter model setting name:"))
         if ok and name.strip():
             try:
                 with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
@@ -1201,18 +1218,18 @@ class AITranslationEditorDialog(QDialog):
                     self.model_settings_combo.setCurrentIndex(index)
 
             except Exception as e:
-                QMessageBox.critical(self, "錯誤", f"新增模型設定失敗: {str(e)}")
+                QMessageBox.critical(self, self.language_manager.get_text("error_title", "Error"), self.language_manager.get_text("save_ai_settings_error", "Failed to save AI settings: {error}").format(error=str(e)))
 
     def delete_model_setting(self):
         """刪除模型設定"""
         current_model = self.model_settings_combo.currentText()
 
         if not current_model:
-            QMessageBox.warning(self, "警告", "請先選擇要刪除的模型設定")
+            QMessageBox.warning(self, self.language_manager.get_text("warning_title", "Warning"), self.language_manager.get_text("select_model_setting", "Select Model Setting:"))
             return
 
-        reply = QMessageBox.question(self, "確認刪除", f"確定要刪除模型設定 '{current_model}' 嗎？",
-                                   QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        reply = QMessageBox.question(self, self.language_manager.get_text("confirm_delete_model", "Are you sure you want to delete model setting '{name}'?").format(name=current_model), self.language_manager.get_text("confirm_delete_model", "Are you sure you want to delete model setting '{name}'?").format(name=current_model),
+                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
 
         if reply == QMessageBox.StandardButton.Yes:
             try:
@@ -1228,7 +1245,7 @@ class AITranslationEditorDialog(QDialog):
                     self.load_ai_settings()
 
             except Exception as e:
-                QMessageBox.critical(self, "錯誤", f"刪除模型設定失敗: {str(e)}")
+                QMessageBox.critical(self, self.language_manager.get_text("error_title", "Error"), self.language_manager.get_text("save_ai_settings_error", "Failed to save AI settings: {error}").format(error=str(e)))
 
     def load_ai_prompt_templates(self):
         """載入AI Prompt模板"""
@@ -1252,11 +1269,11 @@ class AITranslationEditorDialog(QDialog):
                 self.template_combo.setCurrentIndex(index)
 
         except Exception as e:
-            QMessageBox.warning(self, "警告", f"載入Prompt模板失敗: {str(e)}")
+            QMessageBox.warning(self, self.language_manager.get_text("warning_title", "Warning"), self.language_manager.get_text("load_api_prompt_error", "Failed to load Prompt templates: {error}").format(error=str(e)))
 
     def new_template(self):
         """新增模板"""
-        name, ok = QInputDialog.getText(self, "新增模板", "輸入模板名稱:")
+        name, ok = QInputDialog.getText(self, self.language_manager.get_text("new_template_name", "Enter template name:"), self.language_manager.get_text("new_template_name", "Enter template name:"))
         if ok and name.strip():
             try:
                 with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
@@ -1283,18 +1300,18 @@ class AITranslationEditorDialog(QDialog):
                     self.template_combo.setCurrentIndex(index)
 
             except Exception as e:
-                QMessageBox.critical(self, "錯誤", f"新增模板失敗: {str(e)}")
+                QMessageBox.critical(self, self.language_manager.get_text("error_title", "Error"), self.language_manager.get_text("save_ai_settings_error", "Failed to save AI settings: {error}").format(error=str(e)))
 
     def delete_template(self):
         """刪除模板"""
         current_template = self.template_combo.currentText()
 
         if not current_template or current_template == "default":
-            QMessageBox.warning(self, "警告", "無法刪除預設模板")
+            QMessageBox.warning(self, self.language_manager.get_text("warning_title", "Warning"), self.language_manager.get_text("cannot_delete_default_template", "Cannot delete default template"))
             return
 
-        reply = QMessageBox.question(self, "確認刪除", f"確定要刪除模板 '{current_template}' 嗎？",
-                                   QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        reply = QMessageBox.question(self, self.language_manager.get_text("confirm_delete_template", "Are you sure you want to delete template '{name}'?").format(name=current_template), self.language_manager.get_text("confirm_delete_template", "Are you sure you want to delete template '{name}'?").format(name=current_template),
+                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
 
         if reply == QMessageBox.StandardButton.Yes:
             try:
@@ -1310,14 +1327,14 @@ class AITranslationEditorDialog(QDialog):
                     self.load_ai_prompt_templates()
 
             except Exception as e:
-                QMessageBox.critical(self, "錯誤", f"刪除模板失敗: {str(e)}")
+                QMessageBox.critical(self, self.language_manager.get_text("error_title", "Error"), self.language_manager.get_text("save_ai_settings_error", "Failed to save AI settings: {error}").format(error=str(e)))
 
     def save_template(self):
         """儲存模板"""
         current_template = self.template_combo.currentText()
 
         if not current_template:
-            QMessageBox.warning(self, "警告", "請先選擇模板")
+            QMessageBox.warning(self, self.language_manager.get_text("warning_title", "Warning"), self.language_manager.get_text("select_template", "Template Selection:"))
             return
 
         try:
@@ -1340,7 +1357,7 @@ class AITranslationEditorDialog(QDialog):
             with open(get_ai_prompt_path(), "w", encoding="utf-8") as f:
                 json.dump(ai_prompt_data, f, ensure_ascii=False, indent=4)
 
-            QMessageBox.information(self, "成功", f"模板 '{current_template}' 已儲存")
+            QMessageBox.information(self, self.language_manager.get_text("confirm_button", "Confirm"), self.language_manager.get_text("template_saved", "Template '{name}' saved").format(name=current_template))
 
         except Exception as e:
-            QMessageBox.critical(self, "錯誤", f"儲存模板失敗: {str(e)}")
+            QMessageBox.critical(self, self.language_manager.get_text("error_title", "Error"), self.language_manager.get_text("save_ai_settings_error", "Failed to save AI settings: {error}").format(error=str(e)))

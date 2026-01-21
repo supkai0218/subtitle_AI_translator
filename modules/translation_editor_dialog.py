@@ -1,6 +1,9 @@
+#v0.89.02 新增介面語言包切換功能(繁中/英文，介面切換進度80%)
+
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
     QTextEdit, QPushButton, QMessageBox)
 from pathlib import Path
+from modules.language_manager import LanguageManager
 
 class TranslationEditorDialog(QDialog):
     def __init__(self, source_file, target_file, parent=None):
@@ -8,17 +11,23 @@ class TranslationEditorDialog(QDialog):
         self.source_file = source_file
         self.target_file = target_file
         self.source_line_count = 0
+        self.language_manager = LanguageManager()
+        
+        # 從父視窗獲取語言管理器（如果存在），否則使用預設
+        if parent and hasattr(parent, 'language_manager'):
+            self.language_manager = parent.language_manager
+            
         self.setup_ui()
         self.load_source_file()
 
     def setup_ui(self):
-        self.setWindowTitle("AI翻譯內容確認")
+        self.setWindowTitle(self.language_manager.get_text("translation_editor_title", "AI翻譯內容確認"))
         self.resize(800, 600)
         
         layout = QVBoxLayout(self)
         
         # 說明文字
-        info_label = QLabel("請將AI翻譯完成的內容貼上：")
+        info_label = QLabel(self.language_manager.get_text("translation_editor_info", "請將AI翻譯完成的內容貼上："))
         layout.addWidget(info_label)
         
         # 文字編輯區域
@@ -27,16 +36,16 @@ class TranslationEditorDialog(QDialog):
         
         # 行數信息區域
         count_layout = QHBoxLayout()
-        self.source_count_label = QLabel("來源檔案行數：0")
-        self.current_count_label = QLabel("當前內容行數：0")
+        self.source_count_label = QLabel(self.language_manager.get_text("translation_editor_source_count", "來源檔案行數：0"))
+        self.current_count_label = QLabel(self.language_manager.get_text("translation_editor_current_count", "當前內容行數：0"))
         count_layout.addWidget(self.source_count_label)
         count_layout.addWidget(self.current_count_label)
         layout.addLayout(count_layout)
         
         # 按鈕區域
         button_layout = QHBoxLayout()
-        confirm_button = QPushButton("確認")
-        cancel_button = QPushButton("取消")
+        confirm_button = QPushButton(self.language_manager.get_text("confirm_button", "確認"))
+        cancel_button = QPushButton(self.language_manager.get_text("cancel_button", "取消"))
         confirm_button.clicked.connect(self.confirm)
         cancel_button.clicked.connect(self.reject)
         button_layout.addWidget(confirm_button)
@@ -51,14 +60,14 @@ class TranslationEditorDialog(QDialog):
             with open(self.source_file, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
                 self.source_line_count = len(lines)
-                self.source_count_label.setText(f"來源檔案行數：{self.source_line_count}")
+                self.source_count_label.setText(f"{self.language_manager.get_text('translation_editor_source_count', '來源檔案行數：')}{self.source_line_count}")
         except Exception as e:
-            QMessageBox.warning(self, "錯誤", f"讀取來源檔案失敗：{str(e)}")
+            QMessageBox.warning(self, self.language_manager.get_text("error_title", "錯誤"), f"{self.language_manager.get_text('translation_editor_load_error', '讀取來源檔案失敗：')}{str(e)}")
 
     def update_line_count(self):
         content = self.editor.toPlainText()
         current_count = len(content.splitlines())
-        self.current_count_label.setText(f"當前內容行數：{current_count}")
+        self.current_count_label.setText(f"{self.language_manager.get_text('translation_editor_current_count', '當前內容行數：')}{current_count}")
 
     def confirm(self):
         content = self.editor.toPlainText()
@@ -67,9 +76,8 @@ class TranslationEditorDialog(QDialog):
         if current_count != self.source_line_count:
             reply = QMessageBox.warning(
                 self,
-                "行數不符",
-                f"當前內容行數（{current_count}）與來源檔案行數（{self.source_line_count}）不符。\n"
-                "是否要繼續修改？",
+                self.language_manager.get_text("translation_editor_line_count_mismatch", "行數不符"),
+                f"{self.language_manager.get_text('translation_editor_line_count_message', '當前內容行數（{current}）與來源檔案行數（{source}）不符。\n是否要繼續修改？').format(current=current_count, source=self.source_line_count)}",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
             if reply == QMessageBox.StandardButton.Yes:
@@ -85,4 +93,4 @@ class TranslationEditorDialog(QDialog):
             
             self.accept()
         except Exception as e:
-            QMessageBox.critical(self, "錯誤", f"儲存檔案失敗：{str(e)}")
+            QMessageBox.critical(self, self.language_manager.get_text("error_title", "錯誤"), f"{self.language_manager.get_text('translation_editor_save_error', '儲存檔案失敗：')}{str(e)}")

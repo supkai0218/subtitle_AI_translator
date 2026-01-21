@@ -1,3 +1,4 @@
+#v0.89.02 新增介面語言包切換功能(繁中/英文)
 #v0.89.01 新增自訂3B流程原文字幕自定義後綴檔名功能
 #v0.89.00 新增1B時間碼過濾及修正功能：支援設定最大時長閾值和目標時長
 #v0.88.06 修正一鍵自動執行模式的問題：(1)視窗大小鎖定防止變大 (2)修正資料夾開啟邏輯 (3)子資料夾是否遞迴
@@ -28,7 +29,7 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from modules.capcut_converter import CapcutConverter
 from modules.text_filter import TextFilter
 from modules.text_marker import SensitiveWordReplacer
-from modules.translation_editor_dialog_v0 import TranslationEditorDialog
+from modules.translation_editor_dialog import TranslationEditorDialog
 from modules.markreplacer import MarkerReplacer
 from modules.srt_merger_v01 import SRTMerger
 from modules.srt_separator import SrtSeparator
@@ -74,15 +75,7 @@ FLOWS = {
     }
 }
 
-STEP_DESCRIPTIONS = {
-    "1A": "1A: CapCut字幕解析或SRT檔案拆解",
-    "1B": "1B: 文字過濾 (同步處理時間軸)",
-    "1C": "1C: 特殊詞標記",
-    "1D": "1D: 準備AI翻譯檔案",
-    "2C": "2C: AI自動翻譯或手動翻譯",
-    "3A": "3A: 標記文字還原",
-    "3B": "3B: 生成SRT檔案 (翻譯+原文)"
-}
+# STEP_DESCRIPTIONS 移至類中作為方法
 
 # ----------------- 設定檔相關函式與預設值 -----------------
 DEFAULT_SETTINGS = {
@@ -124,6 +117,9 @@ DEFAULT_SETTINGS = {
     "raw_subtitle": {
         "enabled": True,
         "suffix": "_raw"
+    },
+    "language": {
+        "interface_language": "zh-TW"
     }
 }
 
@@ -189,6 +185,14 @@ def load_settings():
                 for key, value in DEFAULT_SETTINGS["raw_subtitle"].items():
                     if key not in settings["raw_subtitle"]:
                         settings["raw_subtitle"][key] = value
+            
+            # 確保語言設定完整
+            if "language" not in settings:
+                settings["language"] = DEFAULT_SETTINGS["language"].copy()
+            else:
+                for key, value in DEFAULT_SETTINGS["language"].items():
+                    if key not in settings["language"]:
+                        settings["language"][key] = value
 
             return settings
         except Exception:
@@ -196,6 +200,7 @@ def load_settings():
     default_settings = copy.deepcopy(DEFAULT_SETTINGS)
     default_settings.setdefault("paths", {})
     default_settings["paths"]["settings_file"] = make_portable_path(settings_file)
+    default_settings.setdefault("language", {})
     update_bootstrap_pointer(settings_file)
     return default_settings
 
@@ -213,14 +218,22 @@ def save_settings(settings):
 from PyQt6.QtWidgets import QTabWidget, QCheckBox, QSpinBox
 
 class SettingsDialog(QDialog):
-    def __init__(self, current_settings, parent=None):
+    def __init__(self, current_settings, parent=None, language_manager=None):
         super().__init__(parent)
-        self.setWindowTitle("系統設定")
+        self.language_manager = language_manager
+        self.setWindowTitle(self._get_text("settings_dialog_title", "系統設定"))
         self.resize(700, 650)
         self.current_settings = current_settings.copy()
         self.inputs = {}
         self.ai_inputs = {}
+        self.language_inputs = {}
         self.init_ui()
+
+    def _get_text(self, key, default=""):
+        """獲取翻譯文字的輔助方法"""
+        if self.language_manager:
+            return self.language_manager.get_text(key, default)
+        return default
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -231,22 +244,27 @@ class SettingsDialog(QDialog):
         # 路徑設定分頁
         paths_tab = QWidget()
         self.setup_paths_tab(paths_tab)
-        tab_widget.addTab(paths_tab, "路徑設定")
+        tab_widget.addTab(paths_tab, self._get_text("paths_tab_title", "路徑設定"))
         
         # AI翻譯設定分頁
         ai_tab = QWidget()
         self.setup_ai_tab(ai_tab)
-        tab_widget.addTab(ai_tab, "AI翻譯設定")
+        tab_widget.addTab(ai_tab, self._get_text("ai_tab_title", "AI翻譯設定"))
+        
+        # 語言設定分頁
+        language_tab = QWidget()
+        self.setup_language_tab(language_tab)
+        tab_widget.addTab(language_tab, self._get_text("language_tab_title", "語言設定"))
         
         layout.addWidget(tab_widget)
         
         # 按鈕區域
         btn_layout = QHBoxLayout()
-        restore_btn = QPushButton("恢復預設值")
+        restore_btn = QPushButton(self._get_text("restore_defaults_button", "恢復預設值"))
         restore_btn.clicked.connect(self.restore_defaults)
-        save_btn = QPushButton("儲存")
+        save_btn = QPushButton(self._get_text("save_button", "儲存"))
         save_btn.clicked.connect(self.accept)
-        cancel_btn = QPushButton("取消")
+        cancel_btn = QPushButton(self._get_text("cancel_button", "取消"))
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(restore_btn)
         btn_layout.addStretch()
@@ -262,22 +280,29 @@ class SettingsDialog(QDialog):
         file_keys = ["markers_db", "script_2A", "script_2B", "script_1B_filter", "filter_patterns_db", "prompt_templates_db", "settings_file"]
         
         key_descriptions = {
-            "capcut_drafts_dir": "CapCut專案預設開啟目錄:",
-            "txt_1A": "1A 字幕/時間軸資料夾:", "txt_1B": "1B 過濾後文字資料夾:",
-            "txt_1C": "1C 標記後文字資料夾:", "txt_2B": "2C 翻譯結果資料夾:",
-            "txt_3A": "3A 標記還原資料夾:", "ai": "AI 交換資料夾:",
-            "json_capcut": "CapCut JSON 儲存資料夾:", "json_bak_markers": "標記備份資料夾:",
-            "srt_input": "SRT 來源資料夾:", "srt_output": "SRT 輸出資料夾:",
-            "markers_db": "標記資料庫檔案:", "script_2A": "2A prompt管理腳本:",
-            "script_2B": "2B 標記管理腳本:", "script_1B_filter": "1B 過濾管理腳本:",
-            "filter_patterns_db": "1B 過濾文字資料庫檔案:",
-            "prompt_templates_db": "Prompt 模板資料庫檔案:",
-            "settings_file": "系統設定檔案位置:"
+            "capcut_drafts_dir": self._get_text("capcut_drafts_dir_label", "CapCut專案預設開啟目錄:"),
+            "txt_1A": self._get_text("txt_1a_label", "1A 字幕/時間軸資料夾:"),
+            "txt_1B": self._get_text("txt_1b_label", "1B 過濾後文字資料夾:"),
+            "txt_1C": self._get_text("txt_1c_label", "1C 標記後文字資料夾:"),
+            "txt_2B": self._get_text("txt_2b_label", "2C 翻譯結果資料夾:"),
+            "txt_3A": self._get_text("txt_3a_label", "3A 標記還原資料夾:"),
+            "ai": self._get_text("ai_folder_label", "AI 交換資料夾:"),
+            "json_capcut": self._get_text("json_capcut_label", "CapCut JSON 儲存資料夾:"),
+            "json_bak_markers": self._get_text("json_bak_markers_label", "標記備份資料夾:"),
+            "srt_input": self._get_text("srt_input_label", "SRT 來源資料夾:"),
+            "srt_output": self._get_text("srt_output_label", "SRT 輸出資料夾:"),
+            "markers_db": self._get_text("markers_db_label", "標記資料庫檔案:"),
+            "script_2A": self._get_text("script_2a_label", "2A prompt管理腳本:"),
+            "script_2B": self._get_text("script_2b_label", "2B 標記管理腳本:"),
+            "script_1B_filter": self._get_text("script_1b_filter_label", "1B 過濾管理腳本:"),
+            "filter_patterns_db": self._get_text("filter_patterns_db_label", "1B 過濾文字資料庫檔案:"),
+            "prompt_templates_db": self._get_text("prompt_templates_db_label", "Prompt 模板資料庫檔案:"),
+            "settings_file": self._get_text("settings_file_label", "系統設定檔案位置:")
         }
 
         for key in dir_keys:
             le = QLineEdit(self.current_settings["paths"].get(key, ""))
-            btn = QPushButton("瀏覽")
+            btn = QPushButton(self._get_text("browse_button", "瀏覽"))
             btn.clicked.connect(lambda checked, le=le: self.browse_directory(le))
             hlayout = QHBoxLayout()
             hlayout.addWidget(le)
@@ -287,7 +312,7 @@ class SettingsDialog(QDialog):
 
         for key in file_keys:
             le = QLineEdit(self.current_settings["paths"].get(key, ""))
-            btn = QPushButton("瀏覽")
+            btn = QPushButton(self._get_text("browse_button", "瀏覽"))
             btn.clicked.connect(lambda checked, le=le: self.browse_file(le))
             hlayout = QHBoxLayout()
             hlayout.addWidget(le)
@@ -304,7 +329,7 @@ class SettingsDialog(QDialog):
         ai_config = self.current_settings.get("ai_translation", {})
 
         # API設定
-        api_group = QGroupBox("API設定")
+        api_group = QGroupBox(self._get_text("api_settings_group", "API設定"))
         api_layout = QFormLayout(api_group)
         
         # API供應商
@@ -314,25 +339,25 @@ class SettingsDialog(QDialog):
         current_provider = ai_config.get("api_provider", "openrouter")
         if current_provider in providers:
             self.ai_inputs["api_provider"].setCurrentText(current_provider)
-        api_layout.addRow("API供應商:", self.ai_inputs["api_provider"])
+        api_layout.addRow(self._get_text("api_provider_label", "API供應商:"), self.ai_inputs["api_provider"])
         
         # API URL
         self.ai_inputs["api_url"] = QLineEdit(ai_config.get("api_url", "https://openrouter.ai/api/v1/chat/completions"))
-        api_layout.addRow("API網址:", self.ai_inputs["api_url"])
+        api_layout.addRow(self._get_text("api_url_label", "API網址:"), self.ai_inputs["api_url"])
         
         # API Key
         self.ai_inputs["api_key"] = QLineEdit(ai_config.get("api_key", ""))
         self.ai_inputs["api_key"].setEchoMode(QLineEdit.EchoMode.Password)
-        api_layout.addRow("API金鑰:", self.ai_inputs["api_key"])
+        api_layout.addRow(self._get_text("api_key_label", "API金鑰:"), self.ai_inputs["api_key"])
         
         # 模型
         self.ai_inputs["model"] = QLineEdit(ai_config.get("model", "anthropic/claude-3-sonnet"))
-        api_layout.addRow("模型名稱:", self.ai_inputs["model"])
+        api_layout.addRow(self._get_text("model_label", "模型名稱:"), self.ai_inputs["model"])
         
         form_layout.addRow("", api_group)
         
         # 翻譯設定
-        translate_group = QGroupBox("翻譯設定")
+        translate_group = QGroupBox(self._get_text("translation_settings_group", "翻譯設定"))
         translate_layout = QFormLayout(translate_group)
         
         # 來源語言
@@ -342,7 +367,7 @@ class SettingsDialog(QDialog):
         current_source = ai_config.get("source_language", "ja")
         if current_source in languages:
             self.ai_inputs["source_language"].setCurrentText(current_source)
-        translate_layout.addRow("來源語言:", self.ai_inputs["source_language"])
+        translate_layout.addRow(self._get_text("source_language_label", "來源語言:"), self.ai_inputs["source_language"])
         
         # 目標語言
         self.ai_inputs["target_language"] = QComboBox()
@@ -350,22 +375,22 @@ class SettingsDialog(QDialog):
         current_target = ai_config.get("target_language", "zh-TW")
         if current_target in languages:
             self.ai_inputs["target_language"].setCurrentText(current_target)
-        translate_layout.addRow("目標語言:", self.ai_inputs["target_language"])
+        translate_layout.addRow(self._get_text("target_language_label", "目標語言:"), self.ai_inputs["target_language"])
         
         # 批次大小（移除上限限制）
         self.ai_inputs["batch_size"] = QSpinBox()
         self.ai_inputs["batch_size"].setRange(1, 9999)
         self.ai_inputs["batch_size"].setValue(ai_config.get("batch_size", 10))
-        translate_layout.addRow("批次大小:", self.ai_inputs["batch_size"])
+        translate_layout.addRow(self._get_text("batch_size_label", "批次大小:"), self.ai_inputs["batch_size"])
         
         # 並行請求數
         self.ai_inputs["max_concurrent_requests"] = QSpinBox()
         self.ai_inputs["max_concurrent_requests"].setRange(1, 20)
         self.ai_inputs["max_concurrent_requests"].setValue(ai_config.get("max_concurrent_requests", 5))
-        translate_layout.addRow("最大並行請求數:", self.ai_inputs["max_concurrent_requests"])
+        translate_layout.addRow(self._get_text("max_concurrent_requests_label", "最大並行請求數:"), self.ai_inputs["max_concurrent_requests"])
         
         # 翻譯驗證
-        self.ai_inputs["enable_validation"] = QCheckBox("啟用翻譯結果驗證")
+        self.ai_inputs["enable_validation"] = QCheckBox(self._get_text("enable_validation_label", "啟用翻譯結果驗證"))
         self.ai_inputs["enable_validation"].setChecked(ai_config.get("enable_validation", True))
         translate_layout.addRow("", self.ai_inputs["enable_validation"])
         
@@ -373,17 +398,17 @@ class SettingsDialog(QDialog):
         self.ai_inputs["max_retries"] = QSpinBox()
         self.ai_inputs["max_retries"].setRange(1, 10)
         self.ai_inputs["max_retries"].setValue(ai_config.get("max_retries", 3))
-        translate_layout.addRow("最大重試次數:", self.ai_inputs["max_retries"])
+        translate_layout.addRow(self._get_text("max_retries_label", "最大重試次數:"), self.ai_inputs["max_retries"])
         
         self.ai_inputs["retry_delay"] = QSpinBox()
         self.ai_inputs["retry_delay"].setRange(1, 30)
         self.ai_inputs["retry_delay"].setValue(ai_config.get("retry_delay", 2))
-        translate_layout.addRow("重試延遲(秒):", self.ai_inputs["retry_delay"])
+        translate_layout.addRow(self._get_text("retry_delay_label", "重試延遲(秒):"), self.ai_inputs["retry_delay"])
         
         form_layout.addRow("", translate_group)
         
         # Prompt設定
-        prompt_group = QGroupBox("Prompt設定")
+        prompt_group = QGroupBox(self._get_text("prompt_settings_group", "Prompt設定"))
         prompt_layout = QFormLayout(prompt_group)
 
         prompts_config = ai_config.get("prompts", {})
@@ -392,27 +417,46 @@ class SettingsDialog(QDialog):
         self.ai_inputs["system_prompt"] = QTextEdit()
         self.ai_inputs["system_prompt"].setMaximumHeight(80)
         self.ai_inputs["system_prompt"].setPlainText(prompts_config.get("system_prompt", ""))
-        prompt_layout.addRow("系統提示詞:", self.ai_inputs["system_prompt"])
+        prompt_layout.addRow(self._get_text("system_prompt_label", "系統提示詞:"), self.ai_inputs["system_prompt"])
 
         # User Prompt Template
         self.ai_inputs["user_prompt_template"] = QTextEdit()
         self.ai_inputs["user_prompt_template"].setMaximumHeight(80)
         self.ai_inputs["user_prompt_template"].setPlainText(prompts_config.get("user_prompt_template", ""))
-        prompt_layout.addRow("用戶提示詞模板:", self.ai_inputs["user_prompt_template"])
+        prompt_layout.addRow(self._get_text("user_prompt_template_label", "用戶提示詞模板:"), self.ai_inputs["user_prompt_template"])
 
         form_layout.addRow("", prompt_group)
         
         layout.addLayout(form_layout)
 
     def browse_directory(self, line_edit):
-        directory = QFileDialog.getExistingDirectory(self, "選擇目錄", line_edit.text())
+        directory = QFileDialog.getExistingDirectory(self, self._get_text("folder_dialog_title", "選擇目錄"), line_edit.text())
         if directory:
             line_edit.setText(directory)
 
     def browse_file(self, line_edit):
-        filename, _ = QFileDialog.getOpenFileName(self, "選擇檔案", line_edit.text())
+        filename, _ = QFileDialog.getOpenFileName(self, self._get_text("file_dialog_title", "選擇檔案"), line_edit.text())
         if filename:
             line_edit.setText(filename)
+
+    def setup_language_tab(self, tab):
+        layout = QVBoxLayout(tab)
+        form_layout = QFormLayout()
+        
+        # 介面語言設定
+        language_group = QGroupBox(self._get_text("interface_language_group", "介面語言設定"))
+        language_layout = QFormLayout(language_group)
+        
+        self.language_inputs["interface_language"] = QComboBox()
+        languages = ["zh-TW", "en"]
+        self.language_inputs["interface_language"].addItems(languages)
+        current_language = self.current_settings.get("language", {}).get("interface_language", "zh-TW")
+        if current_language in languages:
+            self.language_inputs["interface_language"].setCurrentText(current_language)
+        language_layout.addRow(self._get_text("language_select_label", "選擇介面語言:"), self.language_inputs["interface_language"])
+        
+        form_layout.addRow("", language_group)
+        layout.addLayout(form_layout)
 
     def restore_defaults(self):
         # 恢復路徑設定預設值
@@ -438,13 +482,18 @@ class SettingsDialog(QDialog):
         prompt_defaults = ai_defaults["prompts"]
         self.ai_inputs["system_prompt"].setPlainText(prompt_defaults["system_prompt"])
         self.ai_inputs["user_prompt_template"].setPlainText(prompt_defaults["user_prompt_template"])
+        
+        # 恢復語言設定預設值
+        language_defaults = DEFAULT_SETTINGS["language"]
+        self.language_inputs["interface_language"].setCurrentText(language_defaults["interface_language"])
 
     def get_settings(self):
         new_settings = {
             "paths": {},
             "ai_translation": {
                 "prompts": {}
-            }
+            },
+            "language": {}
         }
 
         # 保存路徑設定
@@ -467,6 +516,9 @@ class SettingsDialog(QDialog):
         # 保存Prompt設定
         new_settings["ai_translation"]["prompts"]["system_prompt"] = self.ai_inputs["system_prompt"].toPlainText().strip()
         new_settings["ai_translation"]["prompts"]["user_prompt_template"] = self.ai_inputs["user_prompt_template"].toPlainText().strip()
+        
+        # 保存語言設定
+        new_settings["language"]["interface_language"] = self.language_inputs["interface_language"].currentText()
 
         return new_settings
 
@@ -852,12 +904,18 @@ class FilenameDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("字幕AI翻譯系統 v0.89.01")
+        self.setWindowTitle("字幕AI翻譯系統 v0.89.02")
         self.resize(700, 750)
         self.setMinimumSize(700, 750)  # 設定最小尺寸，防止視窗縮小
         # 視窗大小不鎖定，允許使用者手動放大（如需完全鎖定可加上 self.setMaximumSize(700, 750)）
         self.output_filename = None
         self.settings = load_settings()
+        
+        # 初始化語言管理器
+        from modules.language_manager import LanguageManager
+        self.language_manager = LanguageManager()
+        self.language_manager.load_language(self.settings.get("language", {}).get("interface_language", "zh-TW"))
+        
         self.ai_auto_translate_enabled = False  # 新增:追蹤AI自動翻譯啟用狀態
         self.one_click_auto_mode = False # 新增:一鍵全自動模式狀態
         self.include_subfolders = True  # 新增:批次處理時是否包含子資料夾（預設包含）
@@ -879,12 +937,25 @@ class MainWindow(QMainWindow):
         self.current_batch_index = 0  # 當前處理的檔案索引
         self.batch_errors = []  # 記錄批次處理中的錯誤
         self.setup_ui()
+        self.retranslate_ui()  # 初始化時調用翻譯
         self.worker = ProcessWorker(self)
         self.worker.progress_updated.connect(self.update_progress)
         self.worker.process_complete.connect(self.process_completed)
         self.worker.error_occurred.connect(self.show_error)
         self.worker.show_translation_editor.connect(self.show_translation_editor)
         self.manual_worker = None
+
+    def get_step_descriptions(self):
+        """獲取步驟描述，使用語言管理器"""
+        return {
+            "1A": self.language_manager.get_text("step_1a", "1A: CapCut字幕解析或SRT檔案拆解"),
+            "1B": self.language_manager.get_text("step_1b", "1B: 文字過濾 (同步處理時間軸)"),
+            "1C": self.language_manager.get_text("step_1c", "1C: 特殊詞標記"),
+            "1D": self.language_manager.get_text("step_1d", "1D: 準備AI翻譯檔案"),
+            "2C": self.language_manager.get_text("step_2c", "2C: AI自動翻譯或手動翻譯"),
+            "3A": self.language_manager.get_text("step_3a", "3A: 標記文字還原"),
+            "3B": self.language_manager.get_text("step_3b", "3B: 生成SRT檔案 (翻譯+原文)")
+        }
 
     def setup_ui(self):
         main_widget = QWidget()
@@ -899,25 +970,26 @@ class MainWindow(QMainWindow):
         layout.addLayout(top_layout)
 
         source_group = QGroupBox("步驟 1: 選擇來源")
+        source_group.setObjectName("source_group")
         source_layout = QVBoxLayout(source_group)
         mode_layout = QHBoxLayout()
-        mode_layout.addWidget(QLabel("來源模式:"))
-        self.mode_capcut = QRadioButton("CapCut字幕解析")
-        self.mode_srt = QRadioButton("SRT檔案拆解")
+        mode_layout.addWidget(QLabel(self.language_manager.get_text("source_mode_label", "來源模式:")))
+        self.mode_capcut = QRadioButton(self.language_manager.get_text("capcut_subtitle_parsing", "CapCut字幕解析"))
+        self.mode_srt = QRadioButton(self.language_manager.get_text("srt_file_parsing", "SRT檔案拆解"))
         self.mode_capcut.setChecked(True)
         mode_layout.addWidget(self.mode_capcut)
         mode_layout.addWidget(self.mode_srt)
-        
+
         # 新增：一鍵全自動模式勾選框
-        self.auto_mode_checkbox = QCheckBox("一鍵全自動模式 (One-Click Auto)")
+        self.auto_mode_checkbox = QCheckBox(self.language_manager.get_text("one_click_auto_mode", "一鍵全自動模式 (One-Click Auto)"))
         self.auto_mode_checkbox.setChecked(False)
         self.auto_mode_checkbox.stateChanged.connect(self.on_auto_mode_changed)
         mode_layout.addWidget(self.auto_mode_checkbox)
-        
+
         # 新增：子資料夾處理選項（略微縮排）
         subfolder_layout = QHBoxLayout()
         subfolder_layout.addSpacing(20)  # 左側縮排
-        self.include_subfolders_checkbox = QCheckBox("包含子資料夾")
+        self.include_subfolders_checkbox = QCheckBox(self.language_manager.get_text("include_subfolders", "包含子資料夾"))
         self.include_subfolders_checkbox.setChecked(True)  # 預設啟用
         self.include_subfolders_checkbox.setEnabled(False)  # 預設停用，等待全自動模式啟用
         self.include_subfolders_checkbox.stateChanged.connect(self.on_include_subfolders_changed)
@@ -939,10 +1011,19 @@ class MainWindow(QMainWindow):
         layout.addWidget(source_group)
 
         flow_group = QGroupBox("步驟 2: 選擇執行流程")
+        flow_group.setObjectName("flow_group")
         flow_layout = QVBoxLayout(flow_group)
         self.flow_combo = QComboBox()
+        flow_map = {
+            "full_flow": "flow_full",
+            "parse_only": "flow_parse",
+            "translate_raw": "flow_translate_raw",
+            "filter_only": "flow_filter",
+            "filter_translate": "flow_filter_translate",
+            "mark_translate": "flow_mark_translate"
+        }
         for flow_id, flow_data in FLOWS.items():
-            self.flow_combo.addItem(flow_data["name"], flow_id)
+            self.flow_combo.addItem(self.language_manager.get_text(flow_map.get(flow_id, flow_id), flow_data["name"]), flow_id)
         self.flow_combo.currentIndexChanged.connect(self.update_flow_description)
         flow_layout.addWidget(self.flow_combo)
 
@@ -953,10 +1034,14 @@ class MainWindow(QMainWindow):
         self.update_flow_description()
 
         manual_tools_group = QGroupBox("手動工具")
+        manual_tools_group.setObjectName("manual_tools_group")
         manual_tools_layout = QHBoxLayout(manual_tools_group)
         btn_1b = QPushButton("1B 過濾文字管理")
+        btn_1b.setObjectName("btn_1b")
         btn_2a = QPushButton("2A prompt管理")
+        btn_2a.setObjectName("btn_2a")
         btn_2b = QPushButton("2B 標記資料庫管理")
+        btn_2b.setObjectName("btn_2b")
         self.ai_settings_dialog_btn = QPushButton("AI 翻譯設定 / Prompt")
         btn_1b.clicked.connect(self.run_manual_1B_filter)
         btn_2a.clicked.connect(self.run_manual_2A)
@@ -969,6 +1054,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(manual_tools_group)
 
         run_group = QGroupBox("步驟 3: 執行與狀態")
+        run_group.setObjectName("run_group")
         run_layout = QVBoxLayout(run_group)
         self.run_btn = QPushButton("開始執行")
         self.run_btn.setStyleSheet("font-size: 16px; padding: 10px;")
@@ -985,17 +1071,23 @@ class MainWindow(QMainWindow):
         layout.addWidget(run_group)
 
     def open_settings_dialog(self):
-        dialog = SettingsDialog(self.settings, self)
+        dialog = SettingsDialog(self.settings, self, language_manager=self.language_manager)
         if dialog.exec():
-            self.settings = dialog.get_settings()
+            new_settings = dialog.get_settings()
+            # 檢查語言設定是否有變更
+            if self.settings.get("language", {}).get("interface_language") != new_settings.get("language", {}).get("interface_language"):
+                self.language_manager.load_language(new_settings.get("language", {}).get("interface_language", "zh-TW"))
+                self.retranslate_ui()  # 重新翻譯界面
+            
+            self.settings = new_settings
             save_settings(self.settings)
-            self.log_message("系統設定已儲存。")
+            self.log_message(self.language_manager.get_text("settings_saved", "系統設定已儲存。"))
             
     def on_auto_mode_changed(self, state):
         self.one_click_auto_mode = bool(state)
         self.update_flow_description() # 更新流程描述以反映自動模式狀態
-        mode_text = "啟用" if self.one_click_auto_mode else "停用"
-        self.log_message(f"一鍵全自動模式已{mode_text}")
+        mode_text = self.language_manager.get_text("enabled", "啟用") if self.one_click_auto_mode else self.language_manager.get_text("disabled", "停用")
+        self.log_message(self.language_manager.get_text("auto_mode_status", "一鍵全自動模式已{mode}").format(mode=mode_text))
         
         # 新增：控制子資料夾選項的啟用狀態
         self.include_subfolders_checkbox.setEnabled(self.one_click_auto_mode)
@@ -1003,8 +1095,8 @@ class MainWindow(QMainWindow):
     def on_include_subfolders_changed(self, state):
         """當使用者切換「包含子資料夾」選項時"""
         self.include_subfolders = bool(state)
-        mode_text = "包含子資料夾" if self.include_subfolders else "僅目前資料夾"
-        self.log_message(f"批次處理模式已切換為: {mode_text}")
+        mode_text = self.language_manager.get_text("include_subfolders", "包含子資料夾") if self.include_subfolders else self.language_manager.get_text("current_folder_only", "僅目前資料夾")
+        self.log_message(self.language_manager.get_text("batch_mode_switch", "批次處理模式已切換為: {mode}").format(mode=mode_text))
 
     def update_flow_description(self):
         # 完全清空布局中的所有項（包括 layout 和 widget）
@@ -1018,10 +1110,11 @@ class MainWindow(QMainWindow):
         flow_id = self.flow_combo.currentData()
         if flow_id:
             steps = FLOWS[flow_id]["steps"]
+            step_descriptions = self.get_step_descriptions()
             for step_id in steps:
                 # 處理 '3B_raw' 這種特殊標記
                 clean_step_id = step_id.split('_')[0]
-                desc = STEP_DESCRIPTIONS.get(step_id, STEP_DESCRIPTIONS.get(clean_step_id, f"{step_id}: 未知步驟"))
+                desc = step_descriptions.get(step_id, step_descriptions.get(clean_step_id, f"{step_id}: {self.language_manager.get_text('unknown_step', '未知步驟')}"))
 
                 if step_id == "1B":
                     # 為 1B 步驟添加標籤
@@ -1032,19 +1125,19 @@ class MainWindow(QMainWindow):
                     timecode_layout = QHBoxLayout()
                     timecode_layout.addSpacing(20)  # 縮排
                     
-                    self.timecode_toggle = QCheckBox("啟用時間碼修正")
+                    self.timecode_toggle = QCheckBox(self.language_manager.get_text("enable_timecode_correction", "啟用時間碼修正"))
                     self.timecode_toggle.setChecked(self.timecode_correction_enabled)
                     self.timecode_toggle.stateChanged.connect(self.on_timecode_toggle_changed)
                     timecode_layout.addWidget(self.timecode_toggle)
                     
                     # 參數輸入欄位
-                    timecode_layout.addWidget(QLabel("最大時長(秒):"))
+                    timecode_layout.addWidget(QLabel(self.language_manager.get_text("max_duration_label", "最大時長(秒):")))
                     self.timecode_max_input = QLineEdit(str(self.timecode_max_duration))
                     self.timecode_max_input.setMaximumWidth(60)
                     self.timecode_max_input.setEnabled(self.timecode_correction_enabled)
                     timecode_layout.addWidget(self.timecode_max_input)
                     
-                    timecode_layout.addWidget(QLabel("修正為(秒):"))
+                    timecode_layout.addWidget(QLabel(self.language_manager.get_text("target_duration_label", "修正為(秒):")))
                     self.timecode_target_input = QLineEdit(str(self.timecode_target_duration))
                     self.timecode_target_input.setMaximumWidth(60)
                     self.timecode_target_input.setEnabled(self.timecode_correction_enabled)
@@ -1057,12 +1150,12 @@ class MainWindow(QMainWindow):
                     # 為 2C 步驟添加切換按鈕
                     hlayout = QHBoxLayout()
                     label = QLabel(desc)
-                    self.ai_toggle_btn = QCheckBox("啟用AI自動翻譯")
+                    self.ai_toggle_btn = QCheckBox(self.language_manager.get_text("enable_ai_translation", "啟用AI自動翻譯"))
                     
                     if self.one_click_auto_mode:
                         self.ai_toggle_btn.setChecked(True)
                         self.ai_toggle_btn.setEnabled(False)
-                        self.ai_toggle_btn.setText("AI自動翻譯 (全自動模式強制啟用)")
+                        self.ai_toggle_btn.setText(self.language_manager.get_text("ai_translation_forced", "AI自動翻譯 (全自動模式強制啟用)"))
                     else:
                         self.ai_toggle_btn.setChecked(self.ai_auto_translate_enabled)
                         self.ai_toggle_btn.setEnabled(True)
@@ -1080,13 +1173,13 @@ class MainWindow(QMainWindow):
                     hlayout.addStretch()
                     
                     # raw 字幕啟用勾選框
-                    self.raw_subtitle_checkbox = QCheckBox("生成原文字幕")
+                    self.raw_subtitle_checkbox = QCheckBox(self.language_manager.get_text("generate_raw_subtitle", "生成原文字幕"))
                     self.raw_subtitle_checkbox.setChecked(self.raw_subtitle_enabled)
                     self.raw_subtitle_checkbox.stateChanged.connect(self.on_raw_subtitle_toggle_changed)
                     hlayout.addWidget(self.raw_subtitle_checkbox)
                     
                     # 後綴名稱輸入
-                    hlayout.addWidget(QLabel("後綴:"))
+                    hlayout.addWidget(QLabel(self.language_manager.get_text("suffix_label", "後綴:")))
                     self.raw_subtitle_suffix_input = QLineEdit(self.raw_subtitle_suffix)
                     self.raw_subtitle_suffix_input.setMaximumWidth(80)
                     self.raw_subtitle_suffix_input.setEnabled(self.raw_subtitle_enabled)
@@ -1111,7 +1204,8 @@ class MainWindow(QMainWindow):
         self.timecode_correction_enabled = bool(state)
         self.timecode_max_input.setEnabled(self.timecode_correction_enabled)
         self.timecode_target_input.setEnabled(self.timecode_correction_enabled)
-        self.log_message(f"時間碼修正已{'啟用' if self.timecode_correction_enabled else '停用'}")
+        status_text = self.language_manager.get_text("enabled", "啟用") if self.timecode_correction_enabled else self.language_manager.get_text("disabled", "停用")
+        self.log_message(self.language_manager.get_text("timecode_status", "時間碼修正已{status}").format(status=status_text))
         
         # 保存設定
         self.settings.setdefault("text_filter", {})
@@ -1120,14 +1214,16 @@ class MainWindow(QMainWindow):
 
     def on_ai_toggle_changed(self, state):
         self.ai_auto_translate_enabled = bool(state)
-        self.log_message(f"AI自動翻譯已{'啟用' if self.ai_auto_translate_enabled else '停用'}")
+        status_text = self.language_manager.get_text("enabled", "啟用") if self.ai_auto_translate_enabled else self.language_manager.get_text("disabled", "停用")
+        self.log_message(self.language_manager.get_text("ai_translation_status", "AI自動翻譯已{status}").format(status=status_text))
 
     def on_raw_subtitle_toggle_changed(self, state):
         """raw字幕生成開關切換事件"""
         self.raw_subtitle_enabled = bool(state)
         if hasattr(self, 'raw_subtitle_suffix_input'):
             self.raw_subtitle_suffix_input.setEnabled(self.raw_subtitle_enabled)
-        self.log_message(f"原文字幕生成已{'啟用' if self.raw_subtitle_enabled else '停用'}")
+        status_text = self.language_manager.get_text("enabled", "啟用") if self.raw_subtitle_enabled else self.language_manager.get_text("disabled", "停用")
+        self.log_message(self.language_manager.get_text("raw_subtitle_status", "原文字幕生成已{status}").format(status=status_text))
         
         # 保存設定
         self.settings.setdefault("raw_subtitle", {})
@@ -1153,7 +1249,7 @@ class MainWindow(QMainWindow):
         if self.mode_capcut.isChecked():
             default_dir = self.settings["paths"].get("capcut_drafts_dir", os.path.expanduser("~"))
             if not Path(default_dir).is_dir(): default_dir = os.path.expanduser("~")
-            file_name, _ = QFileDialog.getOpenFileName(self, "選擇 CapCut 的 draft_content.json", default_dir, "JSON Files (draft_content.json)")
+            file_name, _ = QFileDialog.getOpenFileName(self, self.language_manager.get_text("select_capcut_draft", "選擇 CapCut 的 draft_content.json"), default_dir, "JSON Files (draft_content.json)")
         else:
             # SRT模式
             default_dir = self.settings["paths"].get("srt_input", os.path.expanduser("~"))
@@ -1163,23 +1259,23 @@ class MainWindow(QMainWindow):
             if self.one_click_auto_mode:
                 # 建立選擇對話框
                 choice_dialog = QMessageBox(self)
-                choice_dialog.setWindowTitle("選擇來源類型")
-                choice_dialog.setText("請選擇要處理的來源類型:")
+                choice_dialog.setWindowTitle(self.language_manager.get_text("select_source_type_title", "選擇來源類型"))
+                choice_dialog.setText(self.language_manager.get_text("select_source_type_message", "請選擇要處理的來源類型:"))
                 choice_dialog.setIcon(QMessageBox.Icon.Question)
                 
-                btn_file = choice_dialog.addButton("單一SRT檔案", QMessageBox.ButtonRole.AcceptRole)
-                btn_folder = choice_dialog.addButton("資料夾(批次處理)", QMessageBox.ButtonRole.AcceptRole)
-                choice_dialog.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+                btn_file = choice_dialog.addButton(self.language_manager.get_text("single_file_option", "單一SRT檔案"), QMessageBox.ButtonRole.AcceptRole)
+                btn_folder = choice_dialog.addButton(self.language_manager.get_text("folder_option", "資料夾(批次處理)"), QMessageBox.ButtonRole.AcceptRole)
+                choice_dialog.addButton(self.language_manager.get_text("cancel_button", "取消"), QMessageBox.ButtonRole.RejectRole)
                 
                 choice_dialog.exec()
                 clicked_button = choice_dialog.clickedButton()
                 
                 if clicked_button == btn_file:
                     # 選擇單一檔案
-                    file_name, _ = QFileDialog.getOpenFileName(self, "選擇來源 SRT 檔案", default_dir, "SRT Files (*.srt)")
+                    file_name, _ = QFileDialog.getOpenFileName(self, self.language_manager.get_text("file_dialog_title", "選擇來源 SRT 檔案"), default_dir, "SRT Files (*.srt)")
                 elif clicked_button == btn_folder:
                     # 選擇資料夾進行批次處理
-                    folder_path = QFileDialog.getExistingDirectory(self, "選擇包含SRT檔案的資料夾", default_dir)
+                    folder_path = QFileDialog.getExistingDirectory(self, self.language_manager.get_text("select_srt_folder", "選擇包含SRT檔案的資料夾"), default_dir)
                     if folder_path:
                         self.scan_and_prepare_batch(folder_path)
                     return
@@ -1188,12 +1284,12 @@ class MainWindow(QMainWindow):
                     return
             else:
                 # 非全自動模式,只能選擇單一檔案
-                file_name, _ = QFileDialog.getOpenFileName(self, "選擇來源 SRT 檔案", default_dir, "SRT Files (*.srt)")
+                file_name, _ = QFileDialog.getOpenFileName(self, self.language_manager.get_text("file_dialog_title", "選擇來源 SRT 檔案"), default_dir, "SRT Files (*.srt)")
 
         if not file_name: return
 
         if self.mode_capcut.isChecked() and Path(file_name).name != 'draft_content.json':
-            QMessageBox.warning(self, "警告", "請選擇名稱為 draft_content.json 的檔案")
+            QMessageBox.warning(self, self.language_manager.get_text("warning_title", "警告"), self.language_manager.get_text("select_draft_content_warning", "請選擇名稱為 draft_content.json 的檔案"))
             return
 
         if self.one_click_auto_mode:
@@ -1206,7 +1302,7 @@ class MainWindow(QMainWindow):
                  # SRT: 使用檔名 (不含副檔名)
                 self.output_filename = file_path_obj.stem
             
-            self.log_message(f"全自動模式: 已自動設定輸出檔名為 {self.output_filename}")
+            self.log_message(self.language_manager.get_text("auto_mode_filename_set", "全自動模式: 已自動設定輸出檔名為 {filename}").format(filename=self.output_filename))
         else:
             # 手動模式：跳出對話框
             dialog = FilenameDialog(self)
@@ -1217,7 +1313,7 @@ class MainWindow(QMainWindow):
             
         if self.output_filename: # 確保有檔名 (自動模式必有，手動模式如上判斷)
             if not self.output_filename:
-                QMessageBox.warning(self, "警告", "輸出檔名不可為空")
+                QMessageBox.warning(self, self.language_manager.get_text("warning_title", "警告"), self.language_manager.get_text("empty_filename_warning", "輸出檔名不可為空"))
                 return
 
 
@@ -1256,12 +1352,12 @@ class MainWindow(QMainWindow):
                 if assigned_input_path is None:
                     assigned_input_path = str(dest_path)
                 
-                self.file_label.setText(f"來源檔案: {dest_path}")
-                self.output_label.setText(f"輸出檔名: {self.output_filename}")
+                self.file_label.setText(self.language_manager.get_text("file_label_selected", "來源檔案: {path}").format(path=dest_path))
+                self.output_label.setText(self.language_manager.get_text("output_label_set", "輸出檔名: {filename}").format(filename=self.output_filename))
                 self.worker.input_file = assigned_input_path
                 self.worker.output_filename = self.output_filename
                 
-                self.log_message(f"已選擇檔案: {file_name}")
+                self.log_message(self.language_manager.get_text("file_selected_log", "已選擇檔案: {file}").format(file=file_name))
             except Exception as e:
                 self.show_error(f"準備檔案時發生錯誤:{e}")
     
@@ -1289,7 +1385,7 @@ class MainWindow(QMainWindow):
                         srt_files.append(file)
             
             if not srt_files:
-                QMessageBox.warning(self, "警告", f"在資料夾 {folder_path} 中未找到任何SRT檔案")
+                QMessageBox.warning(self, self.language_manager.get_text("warning_title", "警告"), self.language_manager.get_text("no_srt_files_found", "在資料夾 {path} 中未找到任何SRT檔案").format(path=folder_path))
                 return
             
             # 按修改時間排序
@@ -1301,7 +1397,7 @@ class MainWindow(QMainWindow):
                 file_list_text += f"\n... 以及其他 {len(srt_files) - 10} 個檔案"
             
             confirm_msg = f"找到 {len(srt_files)} 個SRT檔案:\n\n{file_list_text}\n\n是否開始批次處理?"
-            reply = QMessageBox.question(self, "確認批次處理", confirm_msg, 
+            reply = QMessageBox.question(self, self.language_manager.get_text("confirm_batch_title", "確認批次處理"), confirm_msg,
                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             
             if reply == QMessageBox.StandardButton.Yes:
@@ -1311,10 +1407,10 @@ class MainWindow(QMainWindow):
                 self.batch_errors = []
                 
                 # 更新UI顯示
-                self.file_label.setText(f"批次模式: {len(srt_files)} 個檔案待處理")
-                self.output_label.setText(f"批次處理模式")
+                self.file_label.setText(self.language_manager.get_text("batch_mode_label", "批次模式: {count} 個檔案待處理").format(count=len(srt_files)))
+                self.output_label.setText(self.language_manager.get_text("batch_processing_label", "批次處理模式"))
                 
-                self.log_message(f"批次處理已準備完成,共 {len(srt_files)} 個檔案")
+                self.log_message(self.language_manager.get_text("batch_processing_ready", "批次處理已準備完成,共 {count} 個檔案").format(count=len(srt_files)))
             else:
                 self.log_message("使用者取消批次處理")
                 
@@ -1325,7 +1421,7 @@ class MainWindow(QMainWindow):
         # 檢查批次模式
         if self.batch_mode:
             if not self.batch_files:
-                QMessageBox.warning(self, "警告", "批次處理模式下沒有待處理的檔案")
+                QMessageBox.warning(self, self.language_manager.get_text("warning_title", "警告"), self.language_manager.get_text("no_batch_files_warning", "批次處理模式下沒有待處理的檔案"))
                 return
             
             # 重置批次處理狀態
@@ -1338,13 +1434,13 @@ class MainWindow(QMainWindow):
             self.log_text.clear()
             self.progress_bar.setValue(0)
             
-            self.log_message(f"開始批次處理,共 {len(self.batch_files)} 個檔案")
+            self.log_message(self.language_manager.get_text("batch_start", "開始批次處理,共 {count} 個檔案").format(count=len(self.batch_files)))
             self.process_next_batch_file()
             return
         
         # 單檔處理模式
         if not self.worker.input_file or not self.output_filename:
-            QMessageBox.warning(self, "警告", "請先透過按鈕選擇來源檔案並設定輸出檔名")
+            QMessageBox.warning(self, self.language_manager.get_text("warning_title", "警告"), self.language_manager.get_text("no_source_selected_warning", "請先透過按鈕選擇來源檔案並設定輸出檔名"))
             return
         
         
@@ -1486,8 +1582,8 @@ class MainWindow(QMainWindow):
             self.run_btn.setEnabled(True)
             self.file_btn.setEnabled(True)
             self.flow_combo.setEnabled(True)
-            self.log_message("所有處理已完成！")
-            QMessageBox.information(self, "完成", "選擇的流程已成功執行完畢！")
+            self.log_message(self.language_manager.get_text("batch_all_complete", "所有處理已完成！"))
+            QMessageBox.information(self, self.language_manager.get_text("completion_title", "完成"), self.language_manager.get_text("process_completed", "選擇的流程已成功執行完畢！"))
 
     def show_error(self, error_message):
         # 檢查是否為批次模式
@@ -1512,7 +1608,7 @@ class MainWindow(QMainWindow):
             self.flow_combo.setEnabled(True)
             self.log_message(f"錯誤: {error_message}")
             self.status_label.setText("發生錯誤！")
-            QMessageBox.critical(self, "錯誤", str(error_message))
+            QMessageBox.critical(self, self.language_manager.get_text("error_title", "錯誤"), str(error_message))
         
     def show_translation_editor(self, source_file, target_file):
         self.log_message("流程暫停，等待使用者輸入翻譯結果...")
@@ -1589,9 +1685,9 @@ class MainWindow(QMainWindow):
         
         # 顯示對話框
         if error_count > 0:
-            QMessageBox.warning(self, "批次處理完成(有錯誤)", report_msg)
+            QMessageBox.warning(self, self.language_manager.get_text("batch_complete_with_errors", "批次處理完成(有錯誤)"), report_msg)
         else:
-            QMessageBox.information(self, "批次處理完成", report_msg)
+            QMessageBox.information(self, self.language_manager.get_text("batch_complete", "批次處理完成"), report_msg)
         
         # 重置批次模式
         self.batch_mode = False
@@ -1604,6 +1700,64 @@ class MainWindow(QMainWindow):
             self.progress_bar.setValue(value)
         self.status_label.setText(message)
         self.log_message(message)
+
+    def retranslate_ui(self):
+        """重新翻譯界面元素"""
+        self.setWindowTitle(self.language_manager.get_text("app_title", "字幕AI翻譯系統 v0.89.02"))
+        self.settings_btn.setText(self.language_manager.get_text("settings_button", "系統設定"))
+
+        # 更新各個群組標題
+        self.findChild(QGroupBox, "source_group").setTitle(self.language_manager.get_text("source_group_title", "步驟 1: 選擇來源"))
+        self.findChild(QGroupBox, "flow_group").setTitle(self.language_manager.get_text("flow_group_title", "步驟 2: 選擇執行流程"))
+        self.findChild(QGroupBox, "manual_tools_group").setTitle(self.language_manager.get_text("manual_tools_group_title", "手動工具"))
+        self.findChild(QGroupBox, "run_group").setTitle(self.language_manager.get_text("run_group_title", "步驟 3: 執行與狀態"))
+
+        # 更新來源模式元件
+        # 找到來源模式區域的標籤並更新
+        for child in self.findChild(QGroupBox, "source_group").findChildren(QLabel):
+            if child.text().startswith("來源模式") or child.text().startswith("Source mode"):
+                child.setText(self.language_manager.get_text("source_mode_label", "來源模式:"))
+                break
+
+        # 更新單選按鈕
+        self.mode_capcut.setText(self.language_manager.get_text("capcut_subtitle_parsing", "CapCut字幕解析"))
+        self.mode_srt.setText(self.language_manager.get_text("srt_file_parsing", "SRT檔案拆解"))
+        self.auto_mode_checkbox.setText(self.language_manager.get_text("one_click_auto_mode", "一鍵全自動模式 (One-Click Auto)"))
+        self.include_subfolders_checkbox.setText(self.language_manager.get_text("include_subfolders", "包含子資料夾"))
+
+        # 更新工具按鈕文本
+        self.file_btn.setText(self.language_manager.get_text("select_file_button", "選擇來源檔案並設定輸出檔名"))
+        self.findChild(QPushButton, "btn_1b").setText(self.language_manager.get_text("btn_1b_text", "1B 過濾文字管理"))
+        self.findChild(QPushButton, "btn_2a").setText(self.language_manager.get_text("btn_2a_text", "2A prompt管理"))
+        self.findChild(QPushButton, "btn_2b").setText(self.language_manager.get_text("btn_2b_text", "2B 標記資料庫管理"))
+        self.ai_settings_dialog_btn.setText(self.language_manager.get_text("btn_ai_settings_text", "AI 翻譯設定 / Prompt"))
+        self.run_btn.setText(self.language_manager.get_text("start_button", "開始執行"))
+
+        # 更新狀態文本
+        self.status_label.setText(self.language_manager.get_text("status_ready", "就緒"))
+        
+        # 更新來源檔案和輸出檔名標籤
+        self.file_label.setText(self.language_manager.get_text("file_label", "來源檔案: 尚未選擇"))
+        self.output_label.setText(self.language_manager.get_text("output_label", "輸出檔名: 尚未設定"))
+        
+        # 更新流程預覽標題
+        self.workflow_preview_box.setTitle(self.language_manager.get_text("workflow_preview_box_title", "流程預覽"))
+
+        # 更新流程選單
+        self.flow_combo.clear()
+        flow_map = {
+            "full_flow": "flow_full",
+            "parse_only": "flow_parse",
+            "translate_raw": "flow_translate_raw",
+            "filter_only": "flow_filter",
+            "filter_translate": "flow_filter_translate",
+            "mark_translate": "flow_mark_translate"
+        }
+        for flow_id, flow_data in FLOWS.items():
+            self.flow_combo.addItem(self.language_manager.get_text(flow_map.get(flow_id, flow_id), flow_data["name"]), flow_id)
+
+        # 更新流程預覽
+        self.update_flow_description()
 
     def log_message(self, message):
         timestamp = datetime.now().strftime('%H:%M:%S')
