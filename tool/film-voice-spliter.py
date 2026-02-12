@@ -111,20 +111,39 @@ def ensure_output_directory(dir_path: str) -> Tuple[bool, str]:
         return False, f"無法創建輸出目錄: {e}"
 
 
-def get_ffmpeg_command(input_file: str, output_file: str, audio_format: str) -> List[str]:
+def get_ffmpeg_command(input_file: str, output_file: str, audio_format: str, sample_rate: str, bitrate: str = '192k') -> List[str]:
     """
-    生成 ffmpeg 命令
-    
+    生成 ffmpeg 命令，包含取樣頻率和位元率設定
+
     Args:
         input_file: 輸入檔案路徑
         output_file: 輸出檔案路徑
         audio_format: 音頻格式（wav/aac/mp3）
-    
+        sample_rate: 取樣頻率 (Hz) 字串，例如 '44100'
+        bitrate: 位元率字串，例如 '192k'
+
     Returns:
         List[str]: 完整的 ffmpeg 命令列表
     """
     base_cmd = ['ffmpeg', '-i', input_file]
-    format_args = FFMPEG_COMMANDS.get(audio_format, FFMPEG_COMMANDS['mp3'])
+    format_args = FFMPEG_COMMANDS.get(audio_format, FFMPEG_COMMANDS['mp3']).copy()
+    
+    # 替換位元率參數（針對 aac 和 mp3）
+    if '-ab' in format_args:
+        ab_index = format_args.index('-ab')
+        if ab_index + 1 < len(format_args):
+            format_args[ab_index + 1] = bitrate
+    
+    # 若格式支援自訂取樣頻率，加入 -ar 參數
+    # WAV 已在預設參數中包含 -ar，為了保持一致，仍可覆寫
+    if '-ar' not in format_args:
+        format_args.extend(['-ar', sample_rate])
+    else:
+        # 替換已有的取樣頻率值
+        ar_index = format_args.index('-ar')
+        if ar_index + 1 < len(format_args):
+            format_args[ar_index + 1] = sample_rate
+    
     return base_cmd + format_args + ['-y', output_file]
 
 
@@ -134,20 +153,24 @@ def get_ffmpeg_command(input_file: str, output_file: str, audio_format: str) -> 
 
 class VideoAudioExtractor:
     """影片音頻提取器類別"""
-    
-    def __init__(self, output_dir: str, audio_format: str = 'mp3'):
+
+    def __init__(self, output_dir: str, audio_format: str = 'mp3', sample_rate: str = '44100', bitrate: str = '192k'):
         """
         初始化提取器
-        
+
         Args:
             output_dir: 輸出資料夾路徑
             audio_format: 音頻格式 (wav/aac/mp3)
+            sample_rate: 取樣頻率 (Hz)，字串形式，例如 '44100'
+            bitrate: 位元率，字串形式，例如 '192k'
         """
         self.output_dir = output_dir
         self.audio_format = audio_format.lower()
+        self.sample_rate = sample_rate
+        self.bitrate = bitrate
         self.file_list: List[str] = []
         self.results: Dict[str, List[str]] = {'success': [], 'failed': []}
-        
+
         # 驗證音頻格式
         if not validate_output_format(self.audio_format):
             raise ValueError(f"不支援的音頻格式: {audio_format}")
@@ -199,8 +222,8 @@ class VideoAudioExtractor:
             Tuple[bool, str]: (是否成功, 錯誤訊息)
         """
         try:
-            # 生成 ffmpeg 命令
-            cmd = get_ffmpeg_command(video_path, output_path, self.audio_format)
+            # 生成 ffmpeg 命令，傳入取樣頻率和位元率
+            cmd = get_ffmpeg_command(video_path, output_path, self.audio_format, self.sample_rate, self.bitrate)
             
             if verbose:
                 print(f"  執行命令: {' '.join(cmd)}")

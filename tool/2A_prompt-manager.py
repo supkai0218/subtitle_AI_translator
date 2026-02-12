@@ -1,8 +1,16 @@
+#V0.89.00 修正路徑問題讓在任何地方執行都可以正常運作
+
 import sys
+from pathlib import Path
+
+# 將專案根目錄加入sys.path
+project_root = Path(__file__).resolve().parent.parent
+if str(project_root) not in sys.path:
+    sys.path.append(str(project_root))
+
 import json
 import os
 from datetime import datetime
-from pathlib import Path
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
     QHBoxLayout, QLabel, QTextEdit, QPushButton, QTableWidget, QTableWidgetItem, 
     QMessageBox, QDialog, QComboBox, QDialogButtonBox, QLineEdit)

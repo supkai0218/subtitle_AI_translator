@@ -1,9 +1,18 @@
+#V0.89.00 修正路徑問題讓在任何地方執行都可以正常運作
+
+import sys
+from pathlib import Path
+
+# 將專案根目錄加入sys.path
+project_root = Path(__file__).resolve().parent.parent
+if str(project_root) not in sys.path:
+    sys.path.append(str(project_root))
+
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import json
 import os
 from datetime import datetime
-from pathlib import Path
 from typing import Dict, List
 
 from modules.settings_path import resolve_settings_asset

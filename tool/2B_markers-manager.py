@@ -1,4 +1,13 @@
+#V0.89.00 修正路徑問題讓在任何地方執行都可以正常運作
+
 import sys
+from pathlib import Path
+
+# 將專案根目錄加入sys.path
+project_root = Path(__file__).resolve().parent.parent
+if str(project_root) not in sys.path:
+    sys.path.append(str(project_root))
+
 import json
 import os
 from datetime import datetime
@@ -7,7 +16,6 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
     QHBoxLayout, QLabel, QLineEdit, QComboBox, QTextEdit, QPushButton, 
     QTableWidget, QTableWidgetItem, QTabWidget, QMessageBox, QFileDialog, QSizePolicy)
 from PyQt6.QtCore import Qt
-from pathlib import Path
 
 from modules.settings_path import resolve_settings_asset
 
@@ -16,7 +24,7 @@ class MarkersDBManager(QMainWindow):
         super().__init__()
         # 修改資料庫和備份路徑
         self.db_file = resolve_settings_asset('markers_db.json')
-        self.backup_dir = Path('../backup/bak_markers')
+        self.backup_dir = project_root / 'backup' / 'bak_markers'
         self.has_unsaved_changes = False
         self.current_data = None
         
