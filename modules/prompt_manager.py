@@ -1,3 +1,4 @@
+#v0.89.04 新增環境變數替換功能，設定檔中可使用 ${VAR_NAME} 來引用環境變數
 #V0.87.06 支援Prompt_manager模板資料庫路徑設定
 
 import json
@@ -5,10 +6,10 @@ from typing import Dict, List, Optional
 from pathlib import Path
 
 try:
-    from .settings_path import resolve_settings_file
+    from .settings_path import resolve_settings_file, substitute_env_vars
 except ImportError:  # pragma: no cover - 兼容直接執行模組
     try:
-        from modules.settings_path import resolve_settings_file  # type: ignore
+        from modules.settings_path import resolve_settings_file, substitute_env_vars  # type: ignore
     except ImportError:  # pragma: no cover - 若無法匯入則保持 None
         resolve_settings_file = None  # type: ignore
 
@@ -290,7 +291,7 @@ class PromptManager:
         try:
             settings_file = resolve_settings_file()
             with open(settings_file, "r", encoding="utf-8") as f:
-                settings_data = json.load(f)
+                settings_data = substitute_env_vars(json.load(f))
             candidate = settings_data.get("paths", {}).get("prompt_templates_db")
             if candidate:
                 resolved = self._normalize_path(candidate)

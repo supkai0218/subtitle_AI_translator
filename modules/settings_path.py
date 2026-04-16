@@ -1,3 +1,5 @@
+#v0.89.04 新增環境變數替換功能，設定檔中可使用 ${VAR_NAME} 來引用環境變數
+
 from __future__ import annotations
 
 import json
@@ -5,6 +7,11 @@ import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Iterable, Optional
+
+# 載入 .env 檔案
+from dotenv import load_dotenv
+_env_path = Path(__file__).resolve().parent.parent / "settings" / ".env"
+load_dotenv(_env_path)
 
 SETTINGS_ENV_VAR = "SUBTITLE_AI_SETTINGS_FILE"
 
@@ -92,6 +99,22 @@ def resolve_settings_dir() -> Path:
 
 def resolve_settings_asset(*segments: str) -> Path:
     return resolve_settings_dir().joinpath(*segments)
+
+
+def substitute_env_vars(data):
+    """遞迴替換資料中的 ${ENV_VAR} 環境變數佔位符"""
+    if isinstance(data, dict):
+        return {key: substitute_env_vars(value) for key, value in data.items()}
+    elif isinstance(data, list):
+        return [substitute_env_vars(item) for item in data]
+    elif isinstance(data, str):
+        import re
+        pattern = r'\$\{([^}]+)\}'
+        def replace(match):
+            var_name = match.group(1)
+            return os.environ.get(var_name, match.group(0))
+        return re.sub(pattern, replace, data)
+    return data
 
 
 def update_bootstrap_pointer(target: Path) -> None:

@@ -1,8 +1,10 @@
 /json/
 /settings/
+settings/.env
 /modules/__pycache__/
 /doc/
 /plans/
+/output/
 *.pyc
 *.pyo
 *.pyd

@@ -54,6 +54,11 @@ class AITranslator:
         self.retry_delay = config.get("retry_delay", 2)
         self.max_concurrent_requests = config.get("max_concurrent_requests", 5)
         
+        # 偵測免費模型（OpenRouter 免費模型以 :free 結尾）
+        self.is_free_model = self.model.endswith(":free")
+        # 免費模型限制：20 RPM，所以每次請求間至少間隔 4 秒
+        self.free_model_delay = config.get("free_model_delay", 4)
+        
         # v1b：移除 enable_validation，驗證由外部模組負責
         
         # 設定日誌
@@ -110,7 +115,11 @@ class AITranslator:
             
             self.logger.info(f"開始翻譯：總行數={len(text_lines)}, 批次數={total_batches}")
             
-            if self.max_concurrent_requests > 1 and total_batches > 1:
+            # 免費模型強制使用循序模式，避免並行請求觸發速率限制
+            if self.is_free_model:
+                self.logger.info("偵測到免費模型，強制使用循序翻譯模式（避免429速率限制）")
+                return self._translate_batch_sequential(text_lines, context_info, progress_callback)
+            elif self.max_concurrent_requests > 1 and total_batches > 1:
                 return self._translate_batch_concurrent(text_lines, context_info, progress_callback)
             else:
                 return self._translate_batch_sequential(text_lines, context_info, progress_callback)
@@ -141,9 +150,11 @@ class AITranslator:
                 
                 all_responses.append(response)
                 
-                # 避免API限制，批次間稍作延遲
+                # 避免API限制，批次間延遲（免費模型使用更長間隔）
                 if i + self.batch_size < len(text_lines):
-                    time.sleep(0.5)
+                    delay = self.free_model_delay if self.is_free_model else self.retry_delay
+                    self.logger.debug(f"批次間延遲 {delay} 秒")
+                    time.sleep(delay)
             
             # 合併所有響應
             combined_response = "\n".join(all_responses)
@@ -263,13 +274,15 @@ class AITranslator:
             self.logger.error(f"批次 {batch_info.index + 1} 翻譯錯誤: {str(e)}")
     
     async def _make_api_request_async(self, messages: List[Dict], max_tokens: int = 2000) -> Optional[str]:
-        """發送異步API請求"""
+        """發送異步API請求，含429速率限制重試"""
         if not AIOHTTP_AVAILABLE:
             raise RuntimeError("aiohttp不可用，無法執行異步請求")
         
         headers = {
             "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/subtitle-ai-translator",
+            "X-Title": "Subtitle AI Translator"
         }
         
         data = {
@@ -281,21 +294,55 @@ class AITranslator:
         
         timeout = aiohttp.ClientTimeout(total=60)
         
-        try:
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(self.api_url, headers=headers, json=data) as response:
-                    response.raise_for_status()
-                    result = await response.json()
-                    
-                    if "choices" in result and len(result["choices"]) > 0:
-                        choice = result["choices"][0]
-                        return choice["message"]["content"]
-                    
-                    return None
-                    
-        except aiohttp.ClientError as e:
-            self.logger.error(f"API請求錯誤: {str(e)}")
-            return None
+        # 免費模型 429 重試次數獨立設定
+        max_429_retries = 5 if self.is_free_model else self.max_retries
+        
+        for attempt in range(max_429_retries + 1):
+            try:
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.post(self.api_url, headers=headers, json=data) as response:
+                        # 處理429速率限制：等待後重試
+                        if response.status == 429:
+                            if attempt < max_429_retries:
+                                retry_after = response.headers.get("Retry-After")
+                                if retry_after:
+                                    wait_time = float(retry_after)
+                                elif self.is_free_model:
+                                    wait_time = max(5, self.free_model_delay)
+                                else:
+                                    wait_time = self.retry_delay * (2 ** attempt)
+                                self.logger.warning(
+                                    f"收到429速率限制，等待 {wait_time:.1f} 秒後重試 "
+                                    f"(第 {attempt + 1}/{max_429_retries} 次重試)"
+                                )
+                                await asyncio.sleep(wait_time)
+                                continue
+                            else:
+                                self.logger.error(
+                                    f"已達最大重試次數 ({max_429_retries})，仍收到429速率限制。"
+                                    f"免費模型有嚴格的速率限制，請稍後再試。"
+                                )
+                                return None
+                        
+                        response.raise_for_status()
+                        result = await response.json()
+                        
+                        if "choices" in result and len(result["choices"]) > 0:
+                            choice = result["choices"][0]
+                            return choice["message"]["content"]
+                        
+                        return None
+                        
+            except (aiohttp.ClientError, Exception) as e:
+                if attempt < max_429_retries and "429" in str(e):
+                    wait_time = max(5, self.free_model_delay) if self.is_free_model else self.retry_delay * (2 ** attempt)
+                    self.logger.warning(f"請求失敗，等待 {wait_time:.1f} 秒後重試: {str(e)}")
+                    await asyncio.sleep(wait_time)
+                    continue
+                self.logger.error(f"API請求錯誤: {str(e)}")
+                return None
+        
+        return None
     
     def _translate_single_batch(self, batch: List[str], context_info: Optional[Dict] = None) -> Tuple[bool, str, str]:
         """翻譯單一批次（同步版本）"""
@@ -355,10 +402,16 @@ class AITranslator:
         ]
     
     def _make_api_request(self, messages: List[Dict], max_tokens: int = 2000) -> Optional[str]:
-        """發送API請求（同步版本）"""
+        """發送API請求（同步版本），含429速率限制智慧重試
+        
+        免費模型的上游 provider 會有 per-request cooldown（約3-5秒），
+        所以 429 重試使用固定等待時間而非指數退避。
+        """
         headers = {
             "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/subtitle-ai-translator",
+            "X-Title": "Subtitle AI Translator"
         }
         
         data = {
@@ -368,21 +421,60 @@ class AITranslator:
             "temperature": 0.3
         }
         
-        try:
-            response = requests.post(self.api_url, headers=headers, json=data, timeout=60)
-            response.raise_for_status()
-            
-            result = response.json()
-            
-            if "choices" in result and len(result["choices"]) > 0:
-                choice = result["choices"][0]
-                return choice["message"]["content"]
-            
-            return None
-            
-        except requests.RequestException as e:
-            self.logger.error(f"API請求錯誤: {str(e)}")
-            return None
+        # 免費模型 429 重試次數獨立設定（因為每次重試只是等待，成本很低）
+        max_429_retries = 5 if self.is_free_model else self.max_retries
+        
+        for attempt in range(max_429_retries + 1):
+            try:
+                response = requests.post(self.api_url, headers=headers, json=data, timeout=60)
+                
+                # 處理429速率限制：等待後重試
+                if response.status_code == 429:
+                    if attempt < max_429_retries:
+                        # 優先使用伺服器的 Retry-After header
+                        retry_after = response.headers.get("Retry-After")
+                        if retry_after:
+                            wait_time = float(retry_after)
+                        elif self.is_free_model:
+                            # 免費模型：上游 provider 有 per-request cooldown
+                            # 使用固定 5 秒等待（經實測確認有效）
+                            wait_time = max(5, self.free_model_delay)
+                        else:
+                            # 付費模型：指數退避
+                            wait_time = self.retry_delay * (2 ** attempt)
+                        self.logger.warning(
+                            f"收到429速率限制，等待 {wait_time:.1f} 秒後重試 "
+                            f"(第 {attempt + 1}/{max_429_retries} 次重試)"
+                        )
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        self.logger.error(
+                            f"已達最大重試次數 ({max_429_retries})，仍收到429速率限制。"
+                            f"免費模型有嚴格的速率限制，請稍後再試。"
+                        )
+                        return None
+                
+                response.raise_for_status()
+                
+                result = response.json()
+                
+                if "choices" in result and len(result["choices"]) > 0:
+                    choice = result["choices"][0]
+                    return choice["message"]["content"]
+                
+                return None
+                
+            except requests.RequestException as e:
+                if attempt < max_429_retries and "429" in str(e):
+                    wait_time = max(5, self.free_model_delay) if self.is_free_model else self.retry_delay * (2 ** attempt)
+                    self.logger.warning(f"請求失敗，等待 {wait_time:.1f} 秒後重試: {str(e)}")
+                    time.sleep(wait_time)
+                    continue
+                self.logger.error(f"API請求錯誤: {str(e)}")
+                return None
+        
+        return None
     
     def _replace_variables(self, template: str, variables: Dict[str, str]) -> str:
         """替換模板中的變數"""

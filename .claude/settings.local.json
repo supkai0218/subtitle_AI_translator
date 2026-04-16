@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(conda --version)",
+      "Bash(export PATH=\"$HOME/miniconda3:$HOME/miniconda3/Scripts:$HOME/miniconda3/condabin:$PATH\")",
+      "Bash(conda tos:*)",
+      "Bash(D:\\\\miniconda3\\\\envs\\\\qwen_asr\\\\python.exe -c \"from qwen_asr import Qwen3ASRModel; import inspect; print\\(inspect.signature\\(Qwen3ASRModel.transcribe\\)\\)\")",
+      "Bash(\"D:\\\\miniconda3\\\\envs\\\\qwen_asr\\\\python.exe\" -c \"from qwen_asr import Qwen3ASRModel; import inspect; print\\(inspect.signature\\(Qwen3ASRModel.transcribe\\)\\)\")",
+      "Bash(cmd.exe /c \"D:\\\\miniconda3\\\\envs\\\\qwen_asr\\\\python.exe -c \\\\\"from qwen_asr import Qwen3ASRModel; import inspect; print\\(inspect.signature\\(Qwen3ASRModel.transcribe\\)\\)\\\\\"\")",
+      "Bash(cmd.exe /c \"chcp 65001 >nul && D:\\\\miniconda3\\\\envs\\\\qwen_asr\\\\python.exe -c \\\\\"from qwen_asr import Qwen3ASRModel; help\\(Qwen3ASRModel.transcribe\\)\\\\\"\")",
+      "Bash(cmd.exe /c \"D:/miniconda3/envs/qwen_asr/python.exe\" -c \"from qwen_asr import Qwen3ASRModel; import inspect; sig = inspect.signature\\(Qwen3ASRModel.transcribe\\); print\\(str\\(sig\\)\\)\")",
+      "Read(//d D:/Python/Subtitle_AI_translator/main/**)",
+      "Bash(\"D:\\\\miniconda3\\\\envs\\\\qwen_asr\\\\python.exe\" -c \"from qwen_asr import Qwen3ASRModel; import inspect; f=open\\('sig.txt','w'\\); f.write\\(str\\(inspect.signature\\(Qwen3ASRModel.transcribe\\)\\)\\); f.close\\(\\)\")",
+      "Bash(\"D:\\\\miniconda3\\\\envs\\\\qwen_asr\\\\python.exe\" -c \"from qwen_asr import Qwen3ASRModel; import inspect; f=open\\('D:/Python/Subtitle_AI_translator/main/tool/sig.txt','w'\\); f.write\\(str\\(inspect.signature\\(Qwen3ASRModel.transcribe\\)\\)\\); f.close\\(\\)\")",
+      "Bash(\"C:\\\\Users\\\\supka\\\\miniconda3\\\\envs\\\\qwen_asr\\\\python.exe\" -c \"from qwen_asr import Qwen3ASRModel; import inspect; f=open\\('D:/Python/Subtitle_AI_translator/main/tool/sig.txt','w'\\); f.write\\(str\\(inspect.signature\\(Qwen3ASRModel.transcribe\\)\\)\\); f.close\\(\\)\")",
+      "WebSearch",
+      "Bash(\"C:\\\\Users\\\\supka\\\\miniconda3\\\\envs\\\\qwen_asr\\\\python.exe\" -c \"from transformers import AutoModel; import os; print\\(os.path.expanduser\\('~/.cache/huggingface'\\)\\)\")",
+      "Bash(\"C:\\\\Users\\\\supka\\\\miniconda3\\\\envs\\\\qwen_asr\\\\python.exe\" -c \"from qwen_asr import Qwen3ASRModel; import inspect; f=open\\('D:/Python/Subtitle_AI_translator/main/tool/from_pretrained_sig.txt','w'\\); f.write\\(str\\(inspect.signature\\(Qwen3ASRModel.from_pretrained\\)\\)\\); f.close\\(\\)\")",
+      "Bash(\"C:\\\\Users\\\\supka\\\\miniconda3\\\\envs\\\\qwen_asr\\\\python.exe\" -c \"import vllm; print\\('vLLM version:', vllm.__version__\\)\")",
+      "Bash(ls -la \"D:/Python/QwenASR/\"*.py)",
+      "Bash(ls -la \"D:/Python/QwenASR/chatllm/\"*.py)",
+      "Bash(\"D:/Python/QwenASR/QwenASR.exe\" --help)",
+      "Bash(echo \"Exit code: $?\")",
+      "Bash(\"D:/Python/QwenASR/python.exe\" -c \"import sys; print\\(sys.path\\)\")",
+      "Bash(\"D:/Python/QwenASR/QwenASR.exe\")",
+      "WebFetch(domain:github.com)",
+      "Bash(ls -la \"D:/Python/QwenASR/_internal/\"*.py)",
+      "Bash(\"QwenASR.exe\" --help)",
+      "Bash(cmd.exe /c \"D:\\\\\\\\Python\\\\\\\\QwenASR\\\\\\\\QwenASR.exe --help\")",
+      "Bash(\"D:/Python/QwenASR/_internal/python.exe\" -c \"import sys; print\\(sys.version\\)\")",
+      "Bash(cmd.exe /c \"D:\\\\\\\\Python\\\\\\\\QwenASR\\\\\\\\_internal\\\\\\\\python.exe -c \\\\\"import sys; print\\(sys.version\\)\\\\\"\")"
+    ]
+  }
+}

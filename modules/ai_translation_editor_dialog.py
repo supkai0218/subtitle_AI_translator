@@ -18,7 +18,7 @@ import json
 from .ai_translator import AITranslator
 from .ai_validator import TranslationValidator
 from .prompt_manager import PromptManager
-from .settings_path import resolve_settings_file, resolve_settings_asset
+from .settings_path import resolve_settings_file, resolve_settings_asset, substitute_env_vars
 import time
 
 def get_ai_prompt_path():
@@ -752,7 +752,7 @@ class AITranslationEditorDialog(QDialog):
             # 重新載入settings.json的原始設定
             settings_file_path = resolve_settings_file()
             with open(settings_file_path, "r", encoding="utf-8") as f:
-                settings_data = json.load(f)
+                settings_data = substitute_env_vars(json.load(f))
 
             original_prompts = settings_data.get("ai_translation", {}).get("prompts", {})
 
@@ -957,7 +957,7 @@ class AITranslationEditorDialog(QDialog):
 
         try:
             with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                ai_prompt_data = json.load(f)
+                ai_prompt_data = substitute_env_vars(json.load(f))
 
             if template_name in ai_prompt_data:
                 template_data = ai_prompt_data[template_name]
@@ -973,7 +973,7 @@ class AITranslationEditorDialog(QDialog):
         """載入AI設定"""
         try:
             with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                ai_prompt_data = json.load(f)
+                ai_prompt_data = substitute_env_vars(json.load(f))
 
             # 載入API設定
             self.api_settings_combo.clear()
@@ -1006,7 +1006,7 @@ class AITranslationEditorDialog(QDialog):
             # 同步API設定
             if current_api:
                 with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                    ai_prompt_data = json.load(f)
+                    ai_prompt_data = substitute_env_vars(json.load(f))
                 api_data = ai_prompt_data.get("default", {}).get("api_settings", {}).get(current_api, {})
                 self.ai_config.update({
                     "api_provider": api_data.get("provider", ""),
@@ -1017,7 +1017,7 @@ class AITranslationEditorDialog(QDialog):
             # 同步模型設定
             if current_model:
                 with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                    ai_prompt_data = json.load(f)
+                    ai_prompt_data = substitute_env_vars(json.load(f))
                 model_data = ai_prompt_data.get("default", {}).get("model_settings", {}).get(current_model, {})
                 self.ai_config["model"] = model_data.get("model", "")
 
@@ -1043,7 +1043,7 @@ class AITranslationEditorDialog(QDialog):
         """儲存AI設定"""
         try:
             with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                ai_prompt_data = json.load(f)
+                ai_prompt_data = substitute_env_vars(json.load(f))
 
             current_api = self.api_settings_combo.currentText()
             current_model = self.model_settings_combo.currentText()
@@ -1098,7 +1098,7 @@ class AITranslationEditorDialog(QDialog):
 
         try:
             with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                ai_prompt_data = json.load(f)
+                ai_prompt_data = substitute_env_vars(json.load(f))
 
             api_data = ai_prompt_data.get("default", {}).get("api_settings", {}).get(current_api, {})
             self.api_provider_edit.setText(api_data.get("provider", ""))
@@ -1120,7 +1120,7 @@ class AITranslationEditorDialog(QDialog):
 
         try:
             with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                ai_prompt_data = json.load(f)
+                ai_prompt_data = substitute_env_vars(json.load(f))
 
             model_data = ai_prompt_data.get("default", {}).get("model_settings", {}).get(current_model, {})
             self.model_edit.setText(model_data.get("model", ""))
@@ -1137,7 +1137,7 @@ class AITranslationEditorDialog(QDialog):
         if ok and name.strip():
             try:
                 with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                    ai_prompt_data = json.load(f)
+                    ai_prompt_data = substitute_env_vars(json.load(f))
 
                 if "default" not in ai_prompt_data:
                     ai_prompt_data["default"] = {"api_settings": {}, "model_settings": {}, "prompt_templates": {}, "translation_config": {}}
@@ -1177,7 +1177,7 @@ class AITranslationEditorDialog(QDialog):
         if reply == QMessageBox.StandardButton.Yes:
             try:
                 with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                    ai_prompt_data = json.load(f)
+                    ai_prompt_data = substitute_env_vars(json.load(f))
 
                 if current_api in ai_prompt_data.get("default", {}).get("api_settings", {}):
                     del ai_prompt_data["default"]["api_settings"][current_api]
@@ -1196,7 +1196,7 @@ class AITranslationEditorDialog(QDialog):
         if ok and name.strip():
             try:
                 with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                    ai_prompt_data = json.load(f)
+                    ai_prompt_data = substitute_env_vars(json.load(f))
 
                 if "default" not in ai_prompt_data:
                     ai_prompt_data["default"] = {"api_settings": {}, "model_settings": {}, "prompt_templates": {}, "translation_config": {}}
@@ -1234,7 +1234,7 @@ class AITranslationEditorDialog(QDialog):
         if reply == QMessageBox.StandardButton.Yes:
             try:
                 with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                    ai_prompt_data = json.load(f)
+                    ai_prompt_data = substitute_env_vars(json.load(f))
 
                 if current_model in ai_prompt_data.get("default", {}).get("model_settings", {}):
                     del ai_prompt_data["default"]["model_settings"][current_model]
@@ -1251,7 +1251,7 @@ class AITranslationEditorDialog(QDialog):
         """載入AI Prompt模板"""
         try:
             with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                ai_prompt_data = json.load(f)
+                ai_prompt_data = substitute_env_vars(json.load(f))
 
             self.template_combo.clear()
 
@@ -1277,7 +1277,7 @@ class AITranslationEditorDialog(QDialog):
         if ok and name.strip():
             try:
                 with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                    ai_prompt_data = json.load(f)
+                    ai_prompt_data = substitute_env_vars(json.load(f))
 
                 # 複製default設定作為新模板
                 ai_prompt_data[name.strip()] = ai_prompt_data.get("default", {
@@ -1316,7 +1316,7 @@ class AITranslationEditorDialog(QDialog):
         if reply == QMessageBox.StandardButton.Yes:
             try:
                 with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                    ai_prompt_data = json.load(f)
+                    ai_prompt_data = substitute_env_vars(json.load(f))
 
                 if current_template in ai_prompt_data:
                     del ai_prompt_data[current_template]
@@ -1339,7 +1339,7 @@ class AITranslationEditorDialog(QDialog):
 
         try:
             with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                ai_prompt_data = json.load(f)
+                ai_prompt_data = substitute_env_vars(json.load(f))
 
             if current_template not in ai_prompt_data:
                 ai_prompt_data[current_template] = {
