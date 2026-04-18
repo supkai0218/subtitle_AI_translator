@@ -1,3 +1,4 @@
+#v0.89.09 新增AI翻譯器調試完成後，將設定寫入一鍵翻譯設定功能
 #v0.89.08 加強AI翻譯實時進度監控功能，實時顯示每個批次的狀態、行數、錯誤代碼和總體進度
 #v0.89.07-3 分離設定檔：AI_prompt.json(Prompt模板)、AI_config.json(API翻譯設定)
 #v0.89.07-2 翻譯參數移至每個模型底下；新增模型時套用預設翻譯參數
@@ -799,6 +800,9 @@ class AITranslationEditorDialog(QDialog):
 
         button_layout.addWidget(save_settings_btn)
         button_layout.addWidget(reset_settings_btn)
+        self.write_one_click_settings_btn = QPushButton("寫入一鍵翻譯設定")
+        self.write_one_click_settings_btn.clicked.connect(self.write_one_click_ai_settings)
+        button_layout.addWidget(self.write_one_click_settings_btn)
         button_layout.addStretch()
 
         layout.addLayout(button_layout)
@@ -887,6 +891,9 @@ class AITranslationEditorDialog(QDialog):
 
         prompt_control_layout.addWidget(self.apply_prompt_btn)
         prompt_control_layout.addWidget(self.reset_prompt_btn)
+        self.write_one_click_prompt_btn = QPushButton("寫入一鍵翻譯設定")
+        self.write_one_click_prompt_btn.clicked.connect(self.write_one_click_prompt_settings)
+        prompt_control_layout.addWidget(self.write_one_click_prompt_btn)
         prompt_control_layout.addStretch()
 
         layout.addLayout(prompt_control_layout)
@@ -1471,6 +1478,74 @@ class AITranslationEditorDialog(QDialog):
             QMessageBox.information(self, self.language_manager.get_text("success_title", "成功"), self.language_manager.get_text("ai_settings_reset", "AI設定已重置"))
         except Exception as e:
             QMessageBox.critical(self, self.language_manager.get_text("error_title", "Error"), self.language_manager.get_text("reset_ai_settings_error", "Failed to reset AI settings: {error}").format(error=str(e)))
+
+    def write_one_click_ai_settings(self):
+        """寫入一鍵翻譯設定（AI供應商、模型、翻譯參數）"""
+        try:
+            settings_file_path = resolve_settings_file()
+            with open(settings_file_path, "r", encoding="utf-8") as f:
+                settings_data = json.load(f)
+
+            # 確保 ai_translation 結構存在
+            if "ai_translation" not in settings_data:
+                settings_data["ai_translation"] = {}
+
+            # 取得當前API和模型
+            current_api = self.api_settings_combo.currentText()
+            current_model = self.model_settings_combo.currentText()
+
+            # 從 AI_config.json 取得 API 詳細設定
+            ai_config_data = load_ai_config_raw()
+            api_data = ai_config_data.get("api_settings", {}).get(current_api, {})
+            model_data = api_data.get("models", {}).get(current_model, {})
+
+            # 更新 ai_translation（排除 prompts，因為 prompts 由另一個按鈕管理）
+            settings_data["ai_translation"]["api_provider"] = api_data.get("provider", "")
+            settings_data["ai_translation"]["api_url"] = api_data.get("url", "")
+            settings_data["ai_translation"]["api_key"] = api_data.get("key", "")
+            settings_data["ai_translation"]["model"] = model_data.get("model", "")
+            settings_data["ai_translation"]["source_language"] = self.source_language_edit.text().strip()
+            settings_data["ai_translation"]["target_language"] = self.target_language_edit.text().strip()
+            settings_data["ai_translation"]["batch_size"] = self.batch_size_spinbox.value()
+            settings_data["ai_translation"]["max_concurrent_requests"] = self.max_concurrent_requests_spinbox.value()
+            settings_data["ai_translation"]["enable_validation"] = self.enable_validation_checkbox.isChecked()
+            settings_data["ai_translation"]["max_retries"] = self.max_retries_spinbox.value()
+            settings_data["ai_translation"]["retry_delay"] = self.retry_delay_spinbox.value()
+            settings_data["ai_translation"]["batch_failed_retry_count"] = self.batch_failed_retry_count_spinbox.value()
+            settings_data["ai_translation"]["empty_threshold"] = self.empty_threshold_spinbox.value() / 100.0
+
+            with open(settings_file_path, "w", encoding="utf-8") as f:
+                json.dump(settings_data, f, ensure_ascii=False, indent=4)
+
+            QMessageBox.information(self, self.language_manager.get_text("success_title", "成功"), "一鍵翻譯 AI 設定已寫入")
+
+        except Exception as e:
+            QMessageBox.critical(self, self.language_manager.get_text("error_title", "Error"), f"寫入一鍵翻譯設定失敗: {str(e)}")
+
+    def write_one_click_prompt_settings(self):
+        """寫入一鍵翻譯 Prompt 設定（system prompt 及 user prompt）"""
+        try:
+            settings_file_path = resolve_settings_file()
+            with open(settings_file_path, "r", encoding="utf-8") as f:
+                settings_data = json.load(f)
+
+            # 確保 ai_translation 和 prompts 結構存在
+            if "ai_translation" not in settings_data:
+                settings_data["ai_translation"] = {}
+            if "prompts" not in settings_data["ai_translation"]:
+                settings_data["ai_translation"]["prompts"] = {}
+
+            # 更新 prompts
+            settings_data["ai_translation"]["prompts"]["system_prompt"] = self.system_prompt_editor.toPlainText()
+            settings_data["ai_translation"]["prompts"]["user_prompt_template"] = self.user_prompt_editor.toPlainText()
+
+            with open(settings_file_path, "w", encoding="utf-8") as f:
+                json.dump(settings_data, f, ensure_ascii=False, indent=4)
+
+            QMessageBox.information(self, self.language_manager.get_text("success_title", "成功"), "一鍵翻譯 Prompt 設定已寫入")
+
+        except Exception as e:
+            QMessageBox.critical(self, self.language_manager.get_text("error_title", "Error"), f"寫入一鍵翻譯 Prompt 設定失敗: {str(e)}")
 
     def on_api_setting_changed(self):
         """API設定改變"""
