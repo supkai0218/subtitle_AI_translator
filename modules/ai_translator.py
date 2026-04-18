@@ -1,3 +1,4 @@
+# v0.89.05 新增批次翻譯失敗重試機制，提升翻譯成功率
 # v0.88.01 新增一鍵全自動翻譯
 
 
@@ -52,6 +53,7 @@ class AITranslator:
         self.batch_size = config.get("batch_size", 10)
         self.max_retries = config.get("max_retries", 3)
         self.retry_delay = config.get("retry_delay", 2)
+        self.batch_failed_retry_count = config.get("batch_failed_retry_count", 3)
         self.max_concurrent_requests = config.get("max_concurrent_requests", 5)
         
         # 偵測免費模型（OpenRouter 免費模型以 :free 結尾）
@@ -217,23 +219,43 @@ class AITranslator:
             return False, "", error_msg
     
     async def _process_batches_async(self, context_info: Optional[Dict], progress_callback) -> Tuple[bool, str]:
-        """異步處理批次"""
+        """異步處理批次，含失敗重試機制"""
         semaphore = asyncio.Semaphore(self.max_concurrent_requests)
-        
+
         async def process_single_batch(batch_info: BatchInfo):
             async with semaphore:
                 await self._translate_batch_async(batch_info, context_info, progress_callback)
-        
+
+        # 第一次處理所有批次
         tasks = [process_single_batch(batch) for batch in self.batches]
         await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # 檢查是否有失敗的批次
+
+        # 檢查是否有失敗的批次，進行重試
         failed_batches = [b for b in self.batches if b.status == BatchStatus.FAILED]
-        
+
+        for retry_round in range(self.batch_failed_retry_count):
+            if not failed_batches:
+                break
+
+            self.logger.info(f"第 {retry_round + 1} 輪重試：共有 {len(failed_batches)} 個批次需要重試")
+
+            # 重置失敗批次的狀態
+            for batch in failed_batches:
+                batch.status = BatchStatus.RETRYING
+                batch.error_message = ""
+
+            # 重新翻譯失敗的批次
+            retry_tasks = [process_single_batch(batch) for batch in failed_batches]
+            await asyncio.gather(*retry_tasks, return_exceptions=True)
+
+            # 更新失敗批次列表
+            failed_batches = [b for b in self.batches if b.status == BatchStatus.FAILED]
+
+        # 檢查最終是否有失敗的批次
         if failed_batches:
             error_messages = [f"批次{b.index + 1}: {b.error_message}" for b in failed_batches]
             return False, f"翻譯失敗: {'; '.join(error_messages)}"
-        
+
         return True, "所有批次翻譯完成"
     
     async def _translate_batch_async(self, batch_info: BatchInfo, context_info: Optional[Dict], progress_callback):

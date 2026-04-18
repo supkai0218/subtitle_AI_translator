@@ -1,3 +1,4 @@
+#v0.89.05 新增批次翻譯失敗重試機制、調控空白翻譯閾值
 #v0.89.02 新增介面語言包切換功能(繁中/英文，介面切換進度80%)
 #v0.88.02 一鍵全自動翻譯驗證功能bug fix
 #V0.88.01 支援一鍵全自動翻譯
@@ -16,7 +17,7 @@ from typing import Dict, List, Optional
 import json
 
 from .ai_translator import AITranslator
-from .ai_validator import TranslationValidator
+from .ai_validator import TranslationValidator, ValidationStatus
 from .prompt_manager import PromptManager
 from .settings_path import resolve_settings_file, resolve_settings_asset, substitute_env_vars
 import time
@@ -24,8 +25,23 @@ import time
 def get_ai_prompt_path():
     return resolve_settings_asset("AI_prompt.json")
 
+def load_ai_prompt_raw():
+    """載入 AI_prompt.json，保留原始 ${...} 佔位符（不用 substitute_env_vars）"""
+    with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def get_resolved_api_key(profile_data: dict, api_name: str) -> str:
+    """取得已解析的 API Key（套用環境變數置換）"""
+    # api_settings is nested under the profile (e.g., profile_data["default"]["api_settings"][api_name]
+    # But we may receive either the full AI_prompt.json or just the profile dict
+    api_settings = profile_data.get("api_settings", {})
+    if not api_settings:  # maybe profile_data is the full dict with "default" etc
+        api_settings = profile_data.get("default", {}).get("api_settings", {})
+    key = api_settings.get(api_name, {}).get("key", "")
+    return substitute_env_vars(key) if isinstance(key, str) else key
+
 class AITranslationWorker(QThread):
-    """AI翻譯工作執行緒 - 使用v1b翻譯器 + v0驗證器"""
+    """AI翻譯工作執行緒 - 使用v1b翻譯器 + v2驗證器（區分重翻時機）"""
     progress_updated = pyqtSignal(str)
     translation_completed = pyqtSignal(list)
     error_occurred = pyqtSignal(str)
@@ -71,19 +87,29 @@ class AITranslationWorker(QThread):
                     continue
                 
                 self.progress_updated.emit("✓ 翻譯完成，驗證結果...")
-                
-                # 驗證響應
-                is_valid, parsed_translations, validation_msg = self.validator.validate_response(
-                    raw_response, 
-                    len(self.text_lines)
+
+                # 驗證響應（v2: 區分重翻時機）
+                # v2: 從設定取得空白翻譯閾值
+                empty_threshold = self.ai_config.get("empty_threshold", 0.01)
+                validation_status, parsed_translations, validation_msg = self.validator.validate_response(
+                    raw_response,
+                    len(self.text_lines),
+                    empty_threshold
                 )
-                
-                if is_valid:
-                    self.progress_updated.emit(f"✓ 驗證通過: {validation_msg}")
+
+                # PASS、ACCEPTABLE、FIXABLE 都視為成功，無需重翻
+                if validation_status in (ValidationStatus.PASS, ValidationStatus.ACCEPTABLE, ValidationStatus.FIXABLE):
+                    status_label = {
+                        ValidationStatus.PASS: "✓ 驗證通過",
+                        ValidationStatus.ACCEPTABLE: "✓ 驗證通過（少量空白）",
+                        ValidationStatus.FIXABLE: "✓ 格式已修復"
+                    }.get(validation_status, "✓ 驗證通過")
+                    self.progress_updated.emit(f"{status_label}: {validation_msg}")
                     self.translation_completed.emit(parsed_translations)
                     return
                 else:
-                    self.progress_updated.emit(f"✗ 驗證失敗: {validation_msg}")
+                    # RETRY_NEEDED: 需要重新翻譯
+                    self.progress_updated.emit(f"✗ 需要重翻: {validation_msg}")
                     if attempt < max_retries - 1:
                         self.progress_updated.emit(f"等待 {retry_delay} 秒後重試...")
                         time.sleep(retry_delay)
@@ -515,6 +541,18 @@ class AITranslationEditorDialog(QDialog):
         self.retry_delay_spinbox.setValue(self.ai_config.get("retry_delay", 2))
         params_layout.addRow(self.language_manager.get_text("retry_delay_field", "Retry Delay (seconds):"), self.retry_delay_spinbox)
 
+        self.batch_failed_retry_count_spinbox = QSpinBox()
+        self.batch_failed_retry_count_spinbox.setRange(0, 10)
+        self.batch_failed_retry_count_spinbox.setValue(self.ai_config.get("batch_failed_retry_count", 3))
+        params_layout.addRow(self.language_manager.get_text("batch_failed_retry_count_field", "Batch Failed Retry Count:"), self.batch_failed_retry_count_spinbox)
+
+        # v2: 空白翻譯閾值（百分比）
+        self.empty_threshold_spinbox = QSpinBox()
+        self.empty_threshold_spinbox.setRange(0, 100)
+        self.empty_threshold_spinbox.setSuffix("%")
+        self.empty_threshold_spinbox.setValue(int(self.ai_config.get("empty_threshold", 1)))
+        params_layout.addRow(self.language_manager.get_text("empty_threshold_field", "Empty Translation Threshold:"), self.empty_threshold_spinbox)
+
         layout.addWidget(params_group)
 
         # 控制按鈕
@@ -639,6 +677,8 @@ class AITranslationEditorDialog(QDialog):
                 "enable_validation": self.enable_validation_checkbox.isChecked(),
                 "max_retries": self.max_retries_spinbox.value(),
                 "retry_delay": self.retry_delay_spinbox.value(),
+                "batch_failed_retry_count": self.batch_failed_retry_count_spinbox.value(),
+                "empty_threshold": self.empty_threshold_spinbox.value() / 100.0,  # v2: 百分比轉小數
             })
             
             # 更新API金鑰（如果不是遮蔽的）
@@ -678,7 +718,9 @@ class AITranslationEditorDialog(QDialog):
             self.enable_validation_checkbox.setChecked(False)
             self.max_retries_spinbox.setValue(3)
             self.retry_delay_spinbox.setValue(2)
-            
+            self.batch_failed_retry_count_spinbox.setValue(3)
+            self.empty_threshold_spinbox.setValue(1)  # v2: 預設 1%
+
             # 重置Prompt設定
             self.translation_style_edit.clear()
             self.video_type_edit.clear()
@@ -957,7 +999,7 @@ class AITranslationEditorDialog(QDialog):
 
         try:
             with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                ai_prompt_data = substitute_env_vars(json.load(f))
+                ai_prompt_data = json.load(f)
 
             if template_name in ai_prompt_data:
                 template_data = ai_prompt_data[template_name]
@@ -973,7 +1015,7 @@ class AITranslationEditorDialog(QDialog):
         """載入AI設定"""
         try:
             with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                ai_prompt_data = substitute_env_vars(json.load(f))
+                ai_prompt_data = json.load(f)
 
             # 載入API設定
             self.api_settings_combo.clear()
@@ -1006,18 +1048,18 @@ class AITranslationEditorDialog(QDialog):
             # 同步API設定
             if current_api:
                 with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                    ai_prompt_data = substitute_env_vars(json.load(f))
+                    ai_prompt_data = json.load(f)
                 api_data = ai_prompt_data.get("default", {}).get("api_settings", {}).get(current_api, {})
                 self.ai_config.update({
                     "api_provider": api_data.get("provider", ""),
                     "api_url": api_data.get("url", ""),
-                    "api_key": api_data.get("key", "")
+                    "api_key": substitute_env_vars(api_data.get("key", ""))
                 })
 
             # 同步模型設定
             if current_model:
                 with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                    ai_prompt_data = substitute_env_vars(json.load(f))
+                    ai_prompt_data = json.load(f)
                 model_data = ai_prompt_data.get("default", {}).get("model_settings", {}).get(current_model, {})
                 self.ai_config["model"] = model_data.get("model", "")
 
@@ -1029,7 +1071,9 @@ class AITranslationEditorDialog(QDialog):
                 "max_concurrent_requests": self.max_concurrent_requests_spinbox.value(),
                 "enable_validation": self.enable_validation_checkbox.isChecked(),
                 "max_retries": self.max_retries_spinbox.value(),
-                "retry_delay": self.retry_delay_spinbox.value()
+                "retry_delay": self.retry_delay_spinbox.value(),
+                "batch_failed_retry_count": self.batch_failed_retry_count_spinbox.value(),
+                "empty_threshold": self.empty_threshold_spinbox.value() / 100.0,  # v2: 百分比轉小數
             })
 
             # 重新初始化翻譯器
@@ -1043,7 +1087,7 @@ class AITranslationEditorDialog(QDialog):
         """儲存AI設定"""
         try:
             with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                ai_prompt_data = substitute_env_vars(json.load(f))
+                ai_prompt_data = json.load(f)
 
             current_api = self.api_settings_combo.currentText()
             current_model = self.model_settings_combo.currentText()
@@ -1066,7 +1110,9 @@ class AITranslationEditorDialog(QDialog):
                 "max_concurrent_requests": self.max_concurrent_requests_spinbox.value(),
                 "enable_validation": self.enable_validation_checkbox.isChecked(),
                 "max_retries": self.max_retries_spinbox.value(),
-                "retry_delay": self.retry_delay_spinbox.value()
+                "retry_delay": self.retry_delay_spinbox.value(),
+                "batch_failed_retry_count": self.batch_failed_retry_count_spinbox.value(),
+                "empty_threshold": self.empty_threshold_spinbox.value() / 100.0,  # v2: 百分比轉小數
             })
 
             with open(get_ai_prompt_path(), "w", encoding="utf-8") as f:
@@ -1098,7 +1144,7 @@ class AITranslationEditorDialog(QDialog):
 
         try:
             with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                ai_prompt_data = substitute_env_vars(json.load(f))
+                ai_prompt_data = json.load(f)
 
             api_data = ai_prompt_data.get("default", {}).get("api_settings", {}).get(current_api, {})
             self.api_provider_edit.setText(api_data.get("provider", ""))
@@ -1120,7 +1166,7 @@ class AITranslationEditorDialog(QDialog):
 
         try:
             with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                ai_prompt_data = substitute_env_vars(json.load(f))
+                ai_prompt_data = json.load(f)
 
             model_data = ai_prompt_data.get("default", {}).get("model_settings", {}).get(current_model, {})
             self.model_edit.setText(model_data.get("model", ""))
@@ -1137,7 +1183,7 @@ class AITranslationEditorDialog(QDialog):
         if ok and name.strip():
             try:
                 with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                    ai_prompt_data = substitute_env_vars(json.load(f))
+                    ai_prompt_data = json.load(f)
 
                 if "default" not in ai_prompt_data:
                     ai_prompt_data["default"] = {"api_settings": {}, "model_settings": {}, "prompt_templates": {}, "translation_config": {}}
@@ -1177,7 +1223,7 @@ class AITranslationEditorDialog(QDialog):
         if reply == QMessageBox.StandardButton.Yes:
             try:
                 with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                    ai_prompt_data = substitute_env_vars(json.load(f))
+                    ai_prompt_data = json.load(f)
 
                 if current_api in ai_prompt_data.get("default", {}).get("api_settings", {}):
                     del ai_prompt_data["default"]["api_settings"][current_api]
@@ -1196,7 +1242,7 @@ class AITranslationEditorDialog(QDialog):
         if ok and name.strip():
             try:
                 with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                    ai_prompt_data = substitute_env_vars(json.load(f))
+                    ai_prompt_data = json.load(f)
 
                 if "default" not in ai_prompt_data:
                     ai_prompt_data["default"] = {"api_settings": {}, "model_settings": {}, "prompt_templates": {}, "translation_config": {}}
@@ -1234,7 +1280,7 @@ class AITranslationEditorDialog(QDialog):
         if reply == QMessageBox.StandardButton.Yes:
             try:
                 with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                    ai_prompt_data = substitute_env_vars(json.load(f))
+                    ai_prompt_data = json.load(f)
 
                 if current_model in ai_prompt_data.get("default", {}).get("model_settings", {}):
                     del ai_prompt_data["default"]["model_settings"][current_model]
@@ -1251,7 +1297,7 @@ class AITranslationEditorDialog(QDialog):
         """載入AI Prompt模板"""
         try:
             with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                ai_prompt_data = substitute_env_vars(json.load(f))
+                ai_prompt_data = json.load(f)
 
             self.template_combo.clear()
 
@@ -1277,7 +1323,7 @@ class AITranslationEditorDialog(QDialog):
         if ok and name.strip():
             try:
                 with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                    ai_prompt_data = substitute_env_vars(json.load(f))
+                    ai_prompt_data = json.load(f)
 
                 # 複製default設定作為新模板
                 ai_prompt_data[name.strip()] = ai_prompt_data.get("default", {
@@ -1316,7 +1362,7 @@ class AITranslationEditorDialog(QDialog):
         if reply == QMessageBox.StandardButton.Yes:
             try:
                 with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                    ai_prompt_data = substitute_env_vars(json.load(f))
+                    ai_prompt_data = json.load(f)
 
                 if current_template in ai_prompt_data:
                     del ai_prompt_data[current_template]
@@ -1339,7 +1385,7 @@ class AITranslationEditorDialog(QDialog):
 
         try:
             with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                ai_prompt_data = substitute_env_vars(json.load(f))
+                ai_prompt_data = json.load(f)
 
             if current_template not in ai_prompt_data:
                 ai_prompt_data[current_template] = {

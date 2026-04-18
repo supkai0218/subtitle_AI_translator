@@ -1,13 +1,21 @@
-# v0.88.02 加強驗證功能容錯能力
-# AI Validator v1 - 翻譯驗證模組
+# v0.89.05 新增 empty_threshold 參數（預設1%），可由 GUI 調控空白翻譯閾值
+# AI Validator v2 - 翻譯驗證模組
 
 import logging
 import re
 from typing import List, Dict, Tuple
 from pathlib import Path
+from enum import Enum
+
+class ValidationStatus(Enum):
+    """驗證狀態枚舉"""
+    PASS = "pass"                      # 驗證通過
+    ACCEPTABLE = "acceptable"          # 驗證通過（帶警告：少量空白翻譯）
+    FIXABLE = "fixable"                # 格式問題可修復，無需重翻
+    RETRY_NEEDED = "retry_needed"      # 需要重新翻譯
 
 class TranslationValidator:
-    """翻譯結果驗證器 v1 - 獨立的驗證層，包含格式修復功能"""
+    """翻譯結果驗證器 v2 - 獨立的驗證層，包含格式修復功能"""
 
     def __init__(self, config: Dict = None):
         """初始化驗證器
@@ -26,20 +34,25 @@ class TranslationValidator:
         )
         self.logger = logging.getLogger(__name__)
 
-    def validate_response(self, response: str, expected_count: int) -> Tuple[bool, List[str], str]:
+    def validate_response(self, response: str, expected_count: int, empty_threshold: float = 0.01) -> Tuple[ValidationStatus, List[str], str]:
         """驗證並解析API響應
 
         Args:
             response: API返回的原始響應字符串
             expected_count: 預期的翻譯行數
+            empty_threshold: 空白翻譯閾值，預設 1%（0.01）。超過此比例則要求重翻。
 
         Returns:
-            (是否有效, 解析的翻譯列表, 錯誤訊息)
+            (驗證狀態, 解析的翻譯列表, 訊息)
+            - PASS: 驗證完全通過
+            - ACCEPTABLE: 驗證通過，但有少量空白翻譯（可接受）
+            - FIXABLE: 格式問題已修復，無需重翻
+            - RETRY_NEEDED: 需要重新翻譯
         """
         try:
             # 步驟1：檢查響應是否為空
             if not response or not response.strip():
-                return False, [], "API響應為空"
+                return ValidationStatus.RETRY_NEEDED, [], "API響應為空"
 
             # 步驟2：解析響應
             parsed_result = self._parse_response(response, expected_count)
@@ -47,18 +60,28 @@ class TranslationValidator:
             # 步驟3：修復格式問題
             repaired_result = self._repair_format(parsed_result, expected_count)
 
-            # 步驟4：驗證修復後的結果
-            is_valid, error_msg = self._validate_parsed_result(repaired_result, expected_count)
+            # 步驟4：驗證修復後的結果（新增：區分錯誤類型）
+            validation_result = self._validate_parsed_result(repaired_result, expected_count, empty_threshold)
+            status = validation_result[0]
+            error_msg = validation_result[1]
 
-            if not is_valid:
-                return False, repaired_result, error_msg
+            if status == ValidationStatus.PASS:
+                return ValidationStatus.PASS, repaired_result, "驗證通過"
 
-            return True, repaired_result, "驗證通過"
+            if status == ValidationStatus.ACCEPTABLE:
+                return ValidationStatus.ACCEPTABLE, repaired_result, error_msg
+
+            if status == ValidationStatus.FIXABLE:
+                # 格式問題已自動修復，視為可接受
+                return ValidationStatus.FIXABLE, repaired_result, error_msg
+
+            # RETRY_NEEDED：需要 caller 重新翻譯
+            return ValidationStatus.RETRY_NEEDED, repaired_result, error_msg
 
         except Exception as e:
             error_msg = f"驗證過程錯誤: {str(e)}"
             self.logger.error(error_msg)
-            return False, [], error_msg
+            return ValidationStatus.RETRY_NEEDED, [], error_msg
 
     def _parse_response(self, response: str, expected_count: int) -> List[str]:
         """解析API響應為翻譯列表
@@ -172,40 +195,56 @@ class TranslationValidator:
             # 如果修復失敗，返回原始結果
             return parsed_result
 
-    def _validate_parsed_result(self, parsed_result: List[str], expected_count: int) -> Tuple[bool, str]:
-        """驗證解析後的翻譯結果
+    def _validate_parsed_result(self, parsed_result: List[str], expected_count: int, empty_threshold: float = 0.01) -> Tuple[ValidationStatus, str]:
+        """驗證解析後的翻譯結果（v2 區分錯誤類型）
 
         檢查項目：
         1. 行數是否正確
         2. 是否有過多空白翻譯
-        3. 格式是否正確（每行應為"序號:內容"格式）
+        3. 格式是否正確（每行應為"序號:內容"格式，內容可為空）
+
+        錯誤分類：
+        - PASS: 完全通過
+        - ACCEPTABLE: 少量空白翻譯（可接受）
+        - FIXABLE: 格式問題已自動修復，無需重翻
+        - RETRY_NEEDED: 行數嚴重不足或結構性錯誤，需要重翻
 
         Args:
             parsed_result: 解析後的翻譯列表
             expected_count: 預期的翻譯行數
+            empty_threshold: 空白翻譯閾值，預設 1%（0.01）。超過此比例則要求重翻。
 
         Returns:
-            (是否有效, 錯誤訊息)
+            (驗證狀態, 訊息)
         """
         try:
             # 檢查行數是否匹配
             if len(parsed_result) != expected_count:
-                msg = f"翻譯行數不匹配: 預期{expected_count}行，實際{len(parsed_result)}行"
-                self.logger.warning(msg)
-                return False, msg
+                # 行數差距過大才需要重翻
+                if len(parsed_result) < expected_count * 0.5:
+                    msg = f"翻譯行數嚴重不足: 預期{expected_count}行，實際{len(parsed_result)}行"
+                    self.logger.warning(msg)
+                    return ValidationStatus.RETRY_NEEDED, msg
+                else:
+                    # 行數略少，可通過補空白修復
+                    msg = f"翻譯行數略少: 預期{expected_count}行，實際{len(parsed_result)}行（已補空白）"
+                    self.logger.warning(msg)
+                    return ValidationStatus.FIXABLE, msg
 
-            # 檢查格式是否正確
-            format_errors = []
+            # 檢查格式是否正確（內容可為空，只檢查序號:格式）
+            # 改用 \d+: 而非 \d+:.+，接受空白翻譯
+            structural_errors = []  # 結構性錯誤（無序號或格式完全不符）
             for i, line in enumerate(parsed_result, 1):
-                if not re.match(r'^\d+:.+', line):
-                    format_errors.append(f"第{i}行格式錯誤: {line[:30]}")
+                if not re.match(r'^\d+:', line):
+                    structural_errors.append(f"第{i}行: {line[:30]}")
 
-            if format_errors:
-                msg = f"格式錯誤: {len(format_errors)}行不符合'序號:內容'格式"
+            if structural_errors:
+                msg = f"格式錯誤: {len(structural_errors)}行缺少序號標記（已嘗試修復）"
                 self.logger.warning(msg)
-                for error in format_errors[:5]:  # 只記錄前5個錯誤
+                for error in structural_errors[:5]:
                     self.logger.debug(error)
-                return False, msg
+                # 格式錯誤視為可修復，無需重翻
+                return ValidationStatus.FIXABLE, msg
 
             # 檢查是否有過多的空白翻譯
             empty_count = sum(1 for t in parsed_result if not t.split(':', 1)[1].strip())
@@ -213,26 +252,25 @@ class TranslationValidator:
             if empty_count > 0:
                 empty_ratio = empty_count / len(parsed_result)
 
-                if empty_ratio > 0.5:
-                    msg = f"翻譯結果包含過多空白內容: {empty_count}/{len(parsed_result)}（{empty_ratio*100:.1f}%）"
+                if empty_ratio > empty_threshold:
+                    msg = f"翻譯結果包含過多空白內容: {empty_count}/{len(parsed_result)}（{empty_ratio*100:.1f}%，閾值{empty_threshold*100:.1f}%）"
                     self.logger.warning(msg)
-
-                    # 記錄空白位置
                     empty_indices = [i+1 for i, t in enumerate(parsed_result) if not t.split(':', 1)[1].strip()]
                     self.logger.debug(f"空白翻譯位於行號: {empty_indices}")
-
-                    return False, msg
+                    # 空白過多仍需要重翻
+                    return ValidationStatus.RETRY_NEEDED, msg
                 else:
-                    # 有少量空白但不超過50%，發出警告但不失敗
-                    msg = f"翻譯結果包含少量空白內容: {empty_count}/{len(parsed_result)}（{empty_ratio*100:.1f}%）"
+                    # 有少量空白但不超過閾值，發出警告但視為可接受
+                    msg = f"翻譯結果包含少量空白內容: {empty_count}/{len(parsed_result)}（{empty_ratio*100:.1f}%，閾值{empty_threshold*100:.1f}%）"
                     self.logger.warning(msg)
+                    return ValidationStatus.ACCEPTABLE, msg
 
-            return True, "驗證通過"
+            return ValidationStatus.PASS, "驗證通過"
 
         except Exception as e:
             msg = f"驗證過程錯誤: {str(e)}"
             self.logger.error(msg)
-            return False, msg
+            return ValidationStatus.RETRY_NEEDED, msg
 
     def validate_with_original(self, original_batch: List[str], translated_batch: List[str]) -> Tuple[bool, str]:
         """與原文對比驗證翻譯結果

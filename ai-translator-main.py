@@ -1,14 +1,9 @@
+#v0.89.05 新增批次翻譯失敗重試機制、調控空白翻譯閾值、移除main檔名版本號
 #v0.89.04 新增環境變數替換功能，設定檔中可使用 ${VAR_NAME} 來引用環境變數
 #v0.89.03 新增音頻分離獨立工具，其他獨立工具路徑及檔名變更
 #v0.89.02 新增介面語言包切換功能(繁中/英文)
 #v0.89.01 新增自訂3B流程原文字幕自定義後綴檔名功能
 #v0.89.00 新增1B時間碼過濾及修正功能：支援設定最大時長閾值和目標時長
-#v0.88.06 修正一鍵自動執行模式的問題：(1)視窗大小鎖定防止變大 (2)修正資料夾開啟邏輯 (3)子資料夾是否遞迴
-#v0.88.05 修正AI自動翻譯後2B檔案序號被移除的問題，導致3A標記還原失敗
-#v0.88.04 新增診斷日誌以追蹤標記還原流程
-#v0.88.03 新增SRT批次處理功能 (資料夾模式)
-#v0.88.02 一鍵全自動翻譯驗證功能bug fix
-#v0.88.01 新增一鍵全自動翻譯
 
 
 import sys
@@ -45,7 +40,7 @@ from modules.settings_path import (
 
 # --- AI翻譯相關模組匯入 ---
 from modules.ai_translator import AITranslator
-from modules.ai_validator import TranslationValidator
+from modules.ai_validator import TranslationValidator, ValidationStatus
 from modules.prompt_manager import PromptManager
 from modules.ai_translation_editor_dialog import AITranslationEditorDialog
 
@@ -104,6 +99,7 @@ DEFAULT_SETTINGS = {
         "batch_size": 10,
         "max_retries": 3,
         "retry_delay": 2,
+        "batch_failed_retry_count": 3,
         "max_concurrent_requests": 5,
         "enable_validation": True,
         "prompts": {
@@ -406,7 +402,12 @@ class SettingsDialog(QDialog):
         self.ai_inputs["retry_delay"].setRange(1, 30)
         self.ai_inputs["retry_delay"].setValue(ai_config.get("retry_delay", 2))
         translate_layout.addRow(self._get_text("retry_delay_label", "重試延遲(秒):"), self.ai_inputs["retry_delay"])
-        
+
+        self.ai_inputs["batch_failed_retry_count"] = QSpinBox()
+        self.ai_inputs["batch_failed_retry_count"].setRange(0, 10)
+        self.ai_inputs["batch_failed_retry_count"].setValue(ai_config.get("batch_failed_retry_count", 3))
+        translate_layout.addRow(self._get_text("batch_failed_retry_count_label", "批次失敗重試次數:"), self.ai_inputs["batch_failed_retry_count"])
+
         form_layout.addRow("", translate_group)
         
         # Prompt設定
@@ -479,6 +480,7 @@ class SettingsDialog(QDialog):
         self.ai_inputs["enable_validation"].setChecked(ai_defaults["enable_validation"])
         self.ai_inputs["max_retries"].setValue(ai_defaults["max_retries"])
         self.ai_inputs["retry_delay"].setValue(ai_defaults["retry_delay"])
+        self.ai_inputs["batch_failed_retry_count"].setValue(ai_defaults["batch_failed_retry_count"])
 
         # 恢復Prompt設定預設值
         prompt_defaults = ai_defaults["prompts"]
@@ -514,6 +516,7 @@ class SettingsDialog(QDialog):
         new_settings["ai_translation"]["enable_validation"] = self.ai_inputs["enable_validation"].isChecked()
         new_settings["ai_translation"]["max_retries"] = self.ai_inputs["max_retries"].value()
         new_settings["ai_translation"]["retry_delay"] = self.ai_inputs["retry_delay"].value()
+        new_settings["ai_translation"]["batch_failed_retry_count"] = self.ai_inputs["batch_failed_retry_count"].value()
 
         # 保存Prompt設定
         new_settings["ai_translation"]["prompts"]["system_prompt"] = self.ai_inputs["system_prompt"].toPlainText().strip()
@@ -738,13 +741,17 @@ class ProcessWorker(QThread):
         if not success:
             raise Exception(f"AI 翻譯失敗: {error_msg}")
             
-        # --- 新增：驗證與清理結果 ---
+        # --- v2驗證：區分重翻時機 ---
         self.log("正在驗證並清理翻譯結果...")
         validator = TranslationValidator(ai_config)
-        is_valid, repaired_result, validation_msg = validator.validate_response(response, len(lines))
-        
-        if not is_valid:
-            self.log(f"警告: 翻譯驗證未完全通過: {validation_msg}")
+        empty_threshold = ai_config.get("empty_threshold", 0.01)  # v2: 空白翻譯閾值，預設1%
+        validation_status, repaired_result, validation_msg = validator.validate_response(response, len(lines), empty_threshold)
+
+        # 只在需要重翻時才發出警告（FIXABLE 已自動修復）
+        if validation_status == ValidationStatus.RETRY_NEEDED:
+            self.log(f"警告: 需要重新翻譯: {validation_msg}")
+        elif validation_status in (ValidationStatus.ACCEPTABLE, ValidationStatus.FIXABLE):
+            self.log(f"提示: {validation_msg}")
         
         # 將 repaired_result (List[str]) 轉換回文字內容
         # 【修正】保留序號格式 "序號:內容"，因為後續的3A步驟需要這個格式
