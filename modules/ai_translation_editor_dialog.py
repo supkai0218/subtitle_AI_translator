@@ -1,3 +1,6 @@
+#v0.89.07-3 分離設定檔：AI_prompt.json(Prompt模板)、AI_config.json(API翻譯設定)
+#v0.89.07-2 翻譯參數移至每個模型底下；新增模型時套用預設翻譯參數
+#v0.89.07-1 API供應商與模型分組對應，選擇供應商後僅顯示該供應商下的模型
 #v0.89.06 修正AI相關參數儲存後，下次開啟無法載入最後選擇的API和模型的問題
 #v0.89.05 新增批次翻譯失敗重試機制、調控空白翻譯閾值
 #v0.89.02 新增介面語言包切換功能(繁中/英文，介面切換進度80%)
@@ -24,11 +27,21 @@ from .settings_path import resolve_settings_file, resolve_settings_asset, substi
 import time
 
 def get_ai_prompt_path():
+    """取得 AI_prompt.json 路徑（Prompt 模板）"""
     return resolve_settings_asset("AI_prompt.json")
+
+def get_ai_config_path():
+    """取得 AI_config.json 路徑（API 翻譯設定）"""
+    return resolve_settings_asset("AI_config.json")
 
 def load_ai_prompt_raw():
     """載入 AI_prompt.json，保留原始 ${...} 佔位符（不用 substitute_env_vars）"""
     with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def load_ai_config_raw():
+    """載入 AI_config.json"""
+    with open(get_ai_config_path(), "r", encoding="utf-8") as f:
         return json.load(f)
 
 def get_resolved_api_key(profile_data: dict, api_name: str) -> str:
@@ -504,57 +517,55 @@ class AITranslationEditorDialog(QDialog):
 
         layout.addLayout(settings_selection_layout)
 
-        # 翻譯參數設定
-        params_group = QGroupBox(self.language_manager.get_text("translation_params_group_title", "Translation Parameters"))
-        params_layout = QFormLayout(params_group)
+        # 翻譯參數設定（目前模型的參數）
+        self.model_translation_group = QGroupBox(self.language_manager.get_text("model_translation_params", "Translation Parameters (Current Model)"))
+        model_params_layout = QFormLayout(self.model_translation_group)
 
         # 語言設定
-        self.source_language_edit = QLineEdit(self.ai_config.get("source_language", ""))
+        self.source_language_edit = QLineEdit("")
         self.source_language_edit.setFixedWidth(int(self.width() * 0.8))
-        params_layout.addRow(self.language_manager.get_text("source_language_field", "Source Language:"), self.source_language_edit)
+        model_params_layout.addRow(self.language_manager.get_text("source_language_field", "Source Language:"), self.source_language_edit)
 
-        self.target_language_edit = QLineEdit(self.ai_config.get("target_language", ""))
+        self.target_language_edit = QLineEdit("")
         self.target_language_edit.setFixedWidth(int(self.width() * 0.8))
-        params_layout.addRow(self.language_manager.get_text("target_language_field", "Target Language:"), self.target_language_edit)
+        model_params_layout.addRow(self.language_manager.get_text("target_language_field", "Target Language:"), self.target_language_edit)
 
         # 翻譯參數
         self.batch_size_spinbox = QSpinBox()
         self.batch_size_spinbox.setRange(1, 100)
-        self.batch_size_spinbox.setValue(self.ai_config.get("batch_size", 10))
-        params_layout.addRow(self.language_manager.get_text("batch_size_field", "Batch Size:"), self.batch_size_spinbox)
+        model_params_layout.addRow(self.language_manager.get_text("batch_size_field", "Batch Size:"), self.batch_size_spinbox)
 
         self.max_concurrent_requests_spinbox = QSpinBox()
         self.max_concurrent_requests_spinbox.setRange(1, 10)
-        self.max_concurrent_requests_spinbox.setValue(self.ai_config.get("max_concurrent_requests", 3))
-        params_layout.addRow(self.language_manager.get_text("max_concurrent_requests_field", "Max Concurrent Requests:"), self.max_concurrent_requests_spinbox)
+        model_params_layout.addRow(self.language_manager.get_text("max_concurrent_requests_field", "Max Concurrent Requests:"), self.max_concurrent_requests_spinbox)
 
         self.enable_validation_checkbox = QCheckBox(self.language_manager.get_text("enable_validation_field", "Enable Translation Validation"))
-        self.enable_validation_checkbox.setChecked(self.ai_config.get("enable_validation", False))
-        params_layout.addRow(self.language_manager.get_text("translation_validation", "Translation Validation:"), self.enable_validation_checkbox)
+        model_params_layout.addRow(self.language_manager.get_text("translation_validation", "Translation Validation:"), self.enable_validation_checkbox)
 
         self.max_retries_spinbox = QSpinBox()
         self.max_retries_spinbox.setRange(0, 5)
-        self.max_retries_spinbox.setValue(self.ai_config.get("max_retries", 3))
-        params_layout.addRow(self.language_manager.get_text("max_retries_field", "Max Retries:"), self.max_retries_spinbox)
+        model_params_layout.addRow(self.language_manager.get_text("max_retries_field", "Max Retries:"), self.max_retries_spinbox)
 
         self.retry_delay_spinbox = QSpinBox()
         self.retry_delay_spinbox.setRange(1, 10)
-        self.retry_delay_spinbox.setValue(self.ai_config.get("retry_delay", 2))
-        params_layout.addRow(self.language_manager.get_text("retry_delay_field", "Retry Delay (seconds):"), self.retry_delay_spinbox)
+        model_params_layout.addRow(self.language_manager.get_text("retry_delay_field", "Retry Delay (seconds):"), self.retry_delay_spinbox)
 
         self.batch_failed_retry_count_spinbox = QSpinBox()
         self.batch_failed_retry_count_spinbox.setRange(0, 10)
-        self.batch_failed_retry_count_spinbox.setValue(self.ai_config.get("batch_failed_retry_count", 3))
-        params_layout.addRow(self.language_manager.get_text("batch_failed_retry_count_field", "Batch Failed Retry Count:"), self.batch_failed_retry_count_spinbox)
+        model_params_layout.addRow(self.language_manager.get_text("batch_failed_retry_count_field", "Batch Failed Retry Count:"), self.batch_failed_retry_count_spinbox)
 
         # v2: 空白翻譯閾值（百分比）
         self.empty_threshold_spinbox = QSpinBox()
         self.empty_threshold_spinbox.setRange(0, 100)
         self.empty_threshold_spinbox.setSuffix("%")
-        self.empty_threshold_spinbox.setValue(int(self.ai_config.get("empty_threshold", 1)))
-        params_layout.addRow(self.language_manager.get_text("empty_threshold_field", "Empty Translation Threshold:"), self.empty_threshold_spinbox)
+        model_params_layout.addRow(self.language_manager.get_text("empty_threshold_field", "Empty Translation Threshold:"), self.empty_threshold_spinbox)
 
-        layout.addWidget(params_group)
+        # 設為預設參數按鈕
+        self.set_default_btn = QPushButton(self.language_manager.get_text("set_as_default", "Set as Default"))
+        self.set_default_btn.clicked.connect(self.set_as_default_translation_config)
+        model_params_layout.addRow("", self.set_default_btn)
+
+        layout.addWidget(self.model_translation_group)
 
         # 控制按鈕
         button_layout = QHBoxLayout()
@@ -1015,21 +1026,17 @@ class AITranslationEditorDialog(QDialog):
     def load_ai_settings(self):
         """載入AI設定"""
         try:
-            with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                ai_prompt_data = json.load(f)
+            ai_config_data = load_ai_config_raw()
 
-            # 載入API設定
+            # 載入API設定（獨立選擇，不觸發模型更新）
+            self.api_settings_combo.currentTextChanged.disconnect()
             self.api_settings_combo.clear()
-            for setting_name in ai_prompt_data.get("default", {}).get("api_settings", {}):
+            for setting_name in ai_config_data.get("api_settings", {}):
                 self.api_settings_combo.addItem(setting_name)
-
-            # 載入模型設定
-            self.model_settings_combo.clear()
-            for setting_name in ai_prompt_data.get("default", {}).get("model_settings", {}):
-                self.model_settings_combo.addItem(setting_name)
+            self.api_settings_combo.currentTextChanged.connect(self.on_api_setting_changed)
 
             # 讀取上次儲存的選擇
-            last_selected = ai_prompt_data.get("default", {}).get("last_selected", {})
+            last_selected = ai_config_data.get("last_selected", {})
             last_api = last_selected.get("api", "")
             last_model = last_selected.get("model", "")
 
@@ -1038,29 +1045,93 @@ class AITranslationEditorDialog(QDialog):
                 index = self.api_settings_combo.findText(last_api)
                 if index >= 0:
                     self.api_settings_combo.setCurrentIndex(index)
-                    self.on_api_setting_changed()
                 elif self.api_settings_combo.count() > 0:
                     self.api_settings_combo.setCurrentIndex(0)
-                    self.on_api_setting_changed()
             elif self.api_settings_combo.count() > 0:
                 self.api_settings_combo.setCurrentIndex(0)
-                self.on_api_setting_changed()
 
-            # 嘗試恢復上次的模型選擇，若不存在則選擇第一個
-            if last_model:
-                index = self.model_settings_combo.findText(last_model)
-                if index >= 0:
-                    self.model_settings_combo.setCurrentIndex(index)
-                    self.on_model_setting_changed()
-                elif self.model_settings_combo.count() > 0:
-                    self.model_settings_combo.setCurrentIndex(0)
-                    self.on_model_setting_changed()
-            elif self.model_settings_combo.count() > 0:
-                self.model_settings_combo.setCurrentIndex(0)
-                self.on_model_setting_changed()
+            # 根據選擇的API載入對應的模型
+            current_api = self.api_settings_combo.currentText()
+            self._load_models_for_api(current_api, last_model)
 
         except Exception as e:
             QMessageBox.warning(self, self.language_manager.get_text("warning_title", "Warning"), self.language_manager.get_text("load_api_settings_error", "Failed to load AI settings: {error}").format(error=str(e)))
+
+    def _load_models_for_api(self, api_name: str, last_model: str = ""):
+        """根據API名稱載入該API下的模型"""
+        try:
+            ai_config_data = load_ai_config_raw()
+
+            api_data = ai_config_data.get("api_settings", {}).get(api_name, {})
+            models = api_data.get("models", {})
+
+            # 載入模型設定（斷開連接避免觸發）
+            self.model_settings_combo.currentTextChanged.disconnect()
+            self.model_settings_combo.clear()
+            for model_name in models:
+                self.model_settings_combo.addItem(model_name)
+            self.model_settings_combo.currentTextChanged.connect(self.on_model_setting_changed)
+
+            # 嘗試恢復上次的模型選擇，若不存在則選擇第一個
+            if last_model and last_model in models:
+                index = self.model_settings_combo.findText(last_model)
+                if index >= 0:
+                    self.model_settings_combo.setCurrentIndex(index)
+                    self._load_model_translation_config(api_name, last_model)
+                elif self.model_settings_combo.count() > 0:
+                    self.model_settings_combo.setCurrentIndex(0)
+                    self._load_model_translation_config(api_name, self.model_settings_combo.currentText())
+            elif self.model_settings_combo.count() > 0:
+                self.model_settings_combo.setCurrentIndex(0)
+                self._load_model_translation_config(api_name, self.model_settings_combo.currentText())
+            else:
+                # 無模型，清空翻譯參數
+                self._clear_translation_params_ui()
+
+        except Exception as e:
+            QMessageBox.warning(self, self.language_manager.get_text("warning_title", "Warning"), self.language_manager.get_text("load_api_settings_error", "Failed to load AI settings: {error}").format(error=str(e)))
+
+    def _load_model_translation_config(self, api_name: str, model_name: str):
+        """載入指定模型的翻譯參數到UI"""
+        try:
+            ai_config_data = load_ai_config_raw()
+
+            model_data = ai_config_data.get("api_settings", {}).get(api_name, {}).get("models", {}).get(model_name, {})
+            translation_config = model_data.get("translation_config", {})
+
+            # 如果模型沒有翻譯參數，使用預設值
+            if not translation_config:
+                translation_config = ai_config_data.get("default_translation_config", {})
+
+            # 載入到UI
+            self.source_language_edit.setText(translation_config.get("source_language", "ja"))
+            self.target_language_edit.setText(translation_config.get("target_language", "zh-TW"))
+            self.batch_size_spinbox.setValue(translation_config.get("batch_size", 100))
+            self.max_concurrent_requests_spinbox.setValue(translation_config.get("max_concurrent_requests", 2))
+            self.enable_validation_checkbox.setChecked(translation_config.get("enable_validation", True))
+            self.max_retries_spinbox.setValue(translation_config.get("max_retries", 3))
+            self.retry_delay_spinbox.setValue(translation_config.get("retry_delay", 4))
+            self.batch_failed_retry_count_spinbox.setValue(translation_config.get("batch_failed_retry_count", 3))
+            self.empty_threshold_spinbox.setValue(int(translation_config.get("empty_threshold", 0.01) * 100))
+
+            # 更新模型名稱顯示
+            self.model_edit.setText(model_data.get("model", ""))
+
+        except Exception as e:
+            QMessageBox.warning(self, self.language_manager.get_text("warning_title", "Warning"), self.language_manager.get_text("load_api_settings_error", "Failed to load AI settings: {error}").format(error=str(e)))
+
+    def _clear_translation_params_ui(self):
+        """清空翻譯參數UI"""
+        self.source_language_edit.clear()
+        self.target_language_edit.clear()
+        self.batch_size_spinbox.setValue(100)
+        self.max_concurrent_requests_spinbox.setValue(2)
+        self.enable_validation_checkbox.setChecked(True)
+        self.max_retries_spinbox.setValue(3)
+        self.retry_delay_spinbox.setValue(4)
+        self.batch_failed_retry_count_spinbox.setValue(3)
+        self.empty_threshold_spinbox.setValue(1)
+        self.model_edit.clear()
 
     def _sync_config_from_ui(self):
         """從UI同步設定到ai_config"""
@@ -1070,20 +1141,18 @@ class AITranslationEditorDialog(QDialog):
 
             # 同步API設定
             if current_api:
-                with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                    ai_prompt_data = json.load(f)
-                api_data = ai_prompt_data.get("default", {}).get("api_settings", {}).get(current_api, {})
+                ai_config_data = load_ai_config_raw()
+                api_data = ai_config_data.get("api_settings", {}).get(current_api, {})
                 self.ai_config.update({
                     "api_provider": api_data.get("provider", ""),
                     "api_url": api_data.get("url", ""),
                     "api_key": substitute_env_vars(api_data.get("key", ""))
                 })
 
-            # 同步模型設定
-            if current_model:
-                with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                    ai_prompt_data = json.load(f)
-                model_data = ai_prompt_data.get("default", {}).get("model_settings", {}).get(current_model, {})
+            # 同步模型設定（從當前API的models中讀取）
+            if current_model and current_api:
+                ai_config_data = load_ai_config_raw()
+                model_data = ai_config_data.get("api_settings", {}).get(current_api, {}).get("models", {}).get(current_model, {})
                 self.ai_config["model"] = model_data.get("model", "")
 
             # 同步翻譯參數
@@ -1109,43 +1178,54 @@ class AITranslationEditorDialog(QDialog):
     def save_ai_settings(self):
         """儲存AI設定"""
         try:
-            with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                ai_prompt_data = json.load(f)
+            ai_config_data = load_ai_config_raw()
 
             current_api = self.api_settings_combo.currentText()
             current_model = self.model_settings_combo.currentText()
 
-            if current_api and current_api in ai_prompt_data.get("default", {}).get("api_settings", {}):
-                ai_prompt_data["default"]["api_settings"][current_api].update({
+            # 確保api_settings結構存在
+            if "api_settings" not in ai_config_data:
+                ai_config_data["api_settings"] = {}
+
+            # 更新API設定
+            if current_api:
+                if current_api not in ai_config_data["api_settings"]:
+                    ai_config_data["api_settings"][current_api] = {"models": {}}
+                ai_config_data["api_settings"][current_api].update({
                     "provider": self.api_provider_edit.text().strip(),
                     "url": self.api_url_edit.text().strip(),
                     "key": self.api_key_edit.text().strip()
                 })
 
-            if current_model and current_model in ai_prompt_data.get("default", {}).get("model_settings", {}):
-                ai_prompt_data["default"]["model_settings"][current_model]["model"] = self.model_edit.text().strip()
+                # 確保models結構存在於該API下
+                if "models" not in ai_config_data["api_settings"][current_api]:
+                    ai_config_data["api_settings"][current_api]["models"] = {}
 
-            # 更新翻譯參數
-            ai_prompt_data["default"]["translation_config"].update({
-                "source_language": self.source_language_edit.text().strip(),
-                "target_language": self.target_language_edit.text().strip(),
-                "batch_size": self.batch_size_spinbox.value(),
-                "max_concurrent_requests": self.max_concurrent_requests_spinbox.value(),
-                "enable_validation": self.enable_validation_checkbox.isChecked(),
-                "max_retries": self.max_retries_spinbox.value(),
-                "retry_delay": self.retry_delay_spinbox.value(),
-                "batch_failed_retry_count": self.batch_failed_retry_count_spinbox.value(),
-                "empty_threshold": self.empty_threshold_spinbox.value() / 100.0,  # v2: 百分比轉小數
-            })
+            # 更新模型設定（儲存到當前API下，包含翻譯參數）
+            if current_model and current_api:
+                ai_config_data["api_settings"][current_api]["models"][current_model] = {
+                    "model": self.model_edit.text().strip(),
+                    "translation_config": {
+                        "source_language": self.source_language_edit.text().strip(),
+                        "target_language": self.target_language_edit.text().strip(),
+                        "batch_size": self.batch_size_spinbox.value(),
+                        "max_concurrent_requests": self.max_concurrent_requests_spinbox.value(),
+                        "enable_validation": self.enable_validation_checkbox.isChecked(),
+                        "max_retries": self.max_retries_spinbox.value(),
+                        "retry_delay": self.retry_delay_spinbox.value(),
+                        "batch_failed_retry_count": self.batch_failed_retry_count_spinbox.value(),
+                        "empty_threshold": self.empty_threshold_spinbox.value() / 100.0,
+                    }
+                }
 
             # 更新最後選擇的API和模型
-            if "last_selected" not in ai_prompt_data["default"]:
-                ai_prompt_data["default"]["last_selected"] = {}
-            ai_prompt_data["default"]["last_selected"]["api"] = current_api
-            ai_prompt_data["default"]["last_selected"]["model"] = current_model
+            if "last_selected" not in ai_config_data:
+                ai_config_data["last_selected"] = {}
+            ai_config_data["last_selected"]["api"] = current_api
+            ai_config_data["last_selected"]["model"] = current_model
 
-            with open(get_ai_prompt_path(), "w", encoding="utf-8") as f:
-                json.dump(ai_prompt_data, f, ensure_ascii=False, indent=4)
+            with open(get_ai_config_path(), "w", encoding="utf-8") as f:
+                json.dump(ai_config_data, f, ensure_ascii=False, indent=4)
 
             # 同步設定到記憶體並重新初始化翻譯器
             self._sync_config_from_ui()
@@ -1172,13 +1252,15 @@ class AITranslationEditorDialog(QDialog):
             return
 
         try:
-            with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                ai_prompt_data = json.load(f)
+            ai_config_data = load_ai_config_raw()
 
-            api_data = ai_prompt_data.get("default", {}).get("api_settings", {}).get(current_api, {})
+            api_data = ai_config_data.get("api_settings", {}).get(current_api, {})
             self.api_provider_edit.setText(api_data.get("provider", ""))
             self.api_url_edit.setText(api_data.get("url", ""))
             self.api_key_edit.setText(api_data.get("key", ""))
+
+            # 根據新選擇的API載入對應的模型
+            self._load_models_for_api(current_api)
 
             # 同步設定到記憶體並重新初始化翻譯器
             self._sync_config_from_ui()
@@ -1188,46 +1270,63 @@ class AITranslationEditorDialog(QDialog):
 
     def on_model_setting_changed(self):
         """模型設定改變"""
+        current_api = self.api_settings_combo.currentText()
         current_model = self.model_settings_combo.currentText()
 
-        if not current_model:
+        if not current_model or not current_api:
             return
 
+        # 載入該模型的翻譯參數
+        self._load_model_translation_config(current_api, current_model)
+
+        # 同步設定到記憶體並重新初始化翻譯器
+        self._sync_config_from_ui()
+
+    def set_as_default_translation_config(self):
+        """將目前的翻譯參數設為預設值"""
         try:
-            with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                ai_prompt_data = json.load(f)
+            ai_config_data = load_ai_config_raw()
 
-            model_data = ai_prompt_data.get("default", {}).get("model_settings", {}).get(current_model, {})
-            self.model_edit.setText(model_data.get("model", ""))
+            # 更新default_translation_config
+            ai_config_data["default_translation_config"] = {
+                "source_language": self.source_language_edit.text().strip(),
+                "target_language": self.target_language_edit.text().strip(),
+                "batch_size": self.batch_size_spinbox.value(),
+                "max_concurrent_requests": self.max_concurrent_requests_spinbox.value(),
+                "enable_validation": self.enable_validation_checkbox.isChecked(),
+                "max_retries": self.max_retries_spinbox.value(),
+                "retry_delay": self.retry_delay_spinbox.value(),
+                "batch_failed_retry_count": self.batch_failed_retry_count_spinbox.value(),
+                "empty_threshold": self.empty_threshold_spinbox.value() / 100.0,
+            }
 
-            # 同步設定到記憶體並重新初始化翻譯器
-            self._sync_config_from_ui()
+            with open(get_ai_config_path(), "w", encoding="utf-8") as f:
+                json.dump(ai_config_data, f, ensure_ascii=False, indent=4)
+
+            QMessageBox.information(self, self.language_manager.get_text("success_title", "成功"), self.language_manager.get_text("default_params_set", "Default translation parameters set"))
 
         except Exception as e:
-            QMessageBox.warning(self, self.language_manager.get_text("warning_title", "Warning"), self.language_manager.get_text("load_api_settings_error", "Failed to load AI settings: {error}").format(error=str(e)))
+            QMessageBox.critical(self, self.language_manager.get_text("error_title", "Error"), self.language_manager.get_text("save_ai_settings_error", "Failed to save default settings: {error}").format(error=str(e)))
 
     def new_api_setting(self):
         """新增API設定"""
         name, ok = QInputDialog.getText(self, self.language_manager.get_text("new_api_setting_name", "Enter API setting name:"), self.language_manager.get_text("new_api_setting_name", "Enter API setting name:"))
         if ok and name.strip():
             try:
-                with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                    ai_prompt_data = json.load(f)
+                ai_config_data = load_ai_config_raw()
 
-                if "default" not in ai_prompt_data:
-                    ai_prompt_data["default"] = {"api_settings": {}, "model_settings": {}, "prompt_templates": {}, "translation_config": {}}
+                if "api_settings" not in ai_config_data:
+                    ai_config_data["api_settings"] = {}
 
-                if "api_settings" not in ai_prompt_data["default"]:
-                    ai_prompt_data["default"]["api_settings"] = {}
-
-                ai_prompt_data["default"]["api_settings"][name.strip()] = {
+                ai_config_data["api_settings"][name.strip()] = {
                     "provider": "",
                     "url": "",
-                    "key": ""
+                    "key": "",
+                    "models": {}
                 }
 
-                with open(get_ai_prompt_path(), "w", encoding="utf-8") as f:
-                    json.dump(ai_prompt_data, f, ensure_ascii=False, indent=4)
+                with open(get_ai_config_path(), "w", encoding="utf-8") as f:
+                    json.dump(ai_config_data, f, ensure_ascii=False, indent=4)
 
                 self.load_ai_settings()
                 # 選擇新建立的設定
@@ -1251,14 +1350,13 @@ class AITranslationEditorDialog(QDialog):
 
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                    ai_prompt_data = json.load(f)
+                ai_config_data = load_ai_config_raw()
 
-                if current_api in ai_prompt_data.get("default", {}).get("api_settings", {}):
-                    del ai_prompt_data["default"]["api_settings"][current_api]
+                if current_api in ai_config_data.get("api_settings", {}):
+                    del ai_config_data["api_settings"][current_api]
 
-                    with open(get_ai_prompt_path(), "w", encoding="utf-8") as f:
-                        json.dump(ai_prompt_data, f, ensure_ascii=False, indent=4)
+                    with open(get_ai_config_path(), "w", encoding="utf-8") as f:
+                        json.dump(ai_config_data, f, ensure_ascii=False, indent=4)
 
                     self.load_ai_settings()
 
@@ -1266,41 +1364,61 @@ class AITranslationEditorDialog(QDialog):
                 QMessageBox.critical(self, self.language_manager.get_text("error_title", "Error"), self.language_manager.get_text("save_ai_settings_error", "Failed to save AI settings: {error}").format(error=str(e)))
 
     def new_model_setting(self):
-        """新增模型設定"""
+        """新增模型設定（在當前API供應商下新增，套用預設翻譯參數）"""
+        current_api = self.api_settings_combo.currentText()
+        if not current_api:
+            QMessageBox.warning(self, self.language_manager.get_text("warning_title", "Warning"), self.language_manager.get_text("select_api_first", "Please select an API provider first"))
+            return
+
         name, ok = QInputDialog.getText(self, self.language_manager.get_text("new_model_setting_name", "Enter model setting name:"), self.language_manager.get_text("new_model_setting_name", "Enter model setting name:"))
         if ok and name.strip():
             try:
-                with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                    ai_prompt_data = json.load(f)
+                ai_config_data = load_ai_config_raw()
 
-                if "default" not in ai_prompt_data:
-                    ai_prompt_data["default"] = {"api_settings": {}, "model_settings": {}, "prompt_templates": {}, "translation_config": {}}
+                if current_api not in ai_config_data["api_settings"]:
+                    ai_config_data["api_settings"][current_api] = {"models": {}}
 
-                if "model_settings" not in ai_prompt_data["default"]:
-                    ai_prompt_data["default"]["model_settings"] = {}
+                if "models" not in ai_config_data["api_settings"][current_api]:
+                    ai_config_data["api_settings"][current_api]["models"] = {}
 
-                ai_prompt_data["default"]["model_settings"][name.strip()] = {
-                    "model": ""
+                # 取得預設翻譯參數
+                default_config = ai_config_data.get("default_translation_config", {
+                    "source_language": "ja",
+                    "target_language": "zh-TW",
+                    "batch_size": 100,
+                    "max_concurrent_requests": 2,
+                    "enable_validation": True,
+                    "max_retries": 3,
+                    "retry_delay": 4,
+                    "batch_failed_retry_count": 3,
+                    "empty_threshold": 0.01
+                })
+
+                ai_config_data["api_settings"][current_api]["models"][name.strip()] = {
+                    "model": "",
+                    "translation_config": default_config.copy()
                 }
 
-                with open(get_ai_prompt_path(), "w", encoding="utf-8") as f:
-                    json.dump(ai_prompt_data, f, ensure_ascii=False, indent=4)
+                with open(get_ai_config_path(), "w", encoding="utf-8") as f:
+                    json.dump(ai_config_data, f, ensure_ascii=False, indent=4)
 
-                self.load_ai_settings()
-                # 選擇新建立的設定
-                index = self.model_settings_combo.findText(name.strip())
-                if index >= 0:
-                    self.model_settings_combo.setCurrentIndex(index)
+                # 重新載入當前API的模型列表並選中新模型
+                self._load_models_for_api(current_api, name.strip())
 
             except Exception as e:
                 QMessageBox.critical(self, self.language_manager.get_text("error_title", "Error"), self.language_manager.get_text("save_ai_settings_error", "Failed to save AI settings: {error}").format(error=str(e)))
 
     def delete_model_setting(self):
-        """刪除模型設定"""
+        """刪除模型設定（從當前API供應商下刪除）"""
+        current_api = self.api_settings_combo.currentText()
         current_model = self.model_settings_combo.currentText()
 
         if not current_model:
             QMessageBox.warning(self, self.language_manager.get_text("warning_title", "Warning"), self.language_manager.get_text("select_model_setting", "Select Model Setting:"))
+            return
+
+        if not current_api:
+            QMessageBox.warning(self, self.language_manager.get_text("warning_title", "Warning"), self.language_manager.get_text("select_api_first", "Please select an API provider first"))
             return
 
         reply = QMessageBox.question(self, self.language_manager.get_text("confirm_delete_model", "Are you sure you want to delete model setting '{name}'?").format(name=current_model), self.language_manager.get_text("confirm_delete_model", "Are you sure you want to delete model setting '{name}'?").format(name=current_model),
@@ -1308,16 +1426,16 @@ class AITranslationEditorDialog(QDialog):
 
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
-                    ai_prompt_data = json.load(f)
+                ai_config_data = load_ai_config_raw()
 
-                if current_model in ai_prompt_data.get("default", {}).get("model_settings", {}):
-                    del ai_prompt_data["default"]["model_settings"][current_model]
+                if current_model in ai_config_data.get("api_settings", {}).get(current_api, {}).get("models", {}):
+                    del ai_config_data["api_settings"][current_api]["models"][current_model]
 
-                    with open(get_ai_prompt_path(), "w", encoding="utf-8") as f:
-                        json.dump(ai_prompt_data, f, ensure_ascii=False, indent=4)
+                    with open(get_ai_config_path(), "w", encoding="utf-8") as f:
+                        json.dump(ai_config_data, f, ensure_ascii=False, indent=4)
 
-                    self.load_ai_settings()
+                    # 重新載入當前API的模型列表
+                    self._load_models_for_api(current_api)
 
             except Exception as e:
                 QMessageBox.critical(self, self.language_manager.get_text("error_title", "Error"), self.language_manager.get_text("save_ai_settings_error", "Failed to save AI settings: {error}").format(error=str(e)))
@@ -1354,16 +1472,13 @@ class AITranslationEditorDialog(QDialog):
                 with open(get_ai_prompt_path(), "r", encoding="utf-8") as f:
                     ai_prompt_data = json.load(f)
 
-                # 複製default設定作為新模板
-                ai_prompt_data[name.strip()] = ai_prompt_data.get("default", {
-                    "api_settings": {},
-                    "model_settings": {},
-                    "prompt_templates": {
+                # 複製default設定作為新模板（僅prompt_templates）
+                ai_prompt_data[name.strip()] = {
+                    "prompt_templates": ai_prompt_data.get("default", {}).get("prompt_templates", {
                         "system_prompt": "",
                         "user_prompt_template": ""
-                    },
-                    "translation_config": {}
-                }).copy()
+                    }).copy()
+                }
 
                 with open(get_ai_prompt_path(), "w", encoding="utf-8") as f:
                     json.dump(ai_prompt_data, f, ensure_ascii=False, indent=4)
@@ -1418,10 +1533,7 @@ class AITranslationEditorDialog(QDialog):
 
             if current_template not in ai_prompt_data:
                 ai_prompt_data[current_template] = {
-                    "api_settings": {},
-                    "model_settings": {},
-                    "prompt_templates": {},
-                    "translation_config": {}
+                    "prompt_templates": {}
                 }
 
             ai_prompt_data[current_template]["prompt_templates"] = {
