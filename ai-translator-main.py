@@ -1,3 +1,4 @@
+#v0.89.06 加入預設命名邏輯：CapCut使用父目錄名稱，SRT使用檔名_ai，提升使用便利性
 #v0.89.05 新增批次翻譯失敗重試機制、調控空白翻譯閾值、移除main檔名版本號
 #v0.89.04 新增環境變數替換功能，設定檔中可使用 ${VAR_NAME} 來引用環境變數
 #v0.89.03 新增音頻分離獨立工具，其他獨立工具路徑及檔名變更
@@ -888,13 +889,14 @@ class Manual2BWorker(QThread):
 
 # ----------------- 主介面 -----------------
 class FilenameDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, default_name=""):
         super().__init__(parent)
         self.setWindowTitle("設定輸出檔案名稱")
         self.setModal(True)
         self.layout = QVBoxLayout(self)
         self.layout.addWidget(QLabel("請輸入輸出檔名 (不含副檔名):"))
-        self.name_input = QLineEdit()
+        self.name_input = QLineEdit(default_name)
+        self.name_input.selectAll()
         self.layout.addWidget(self.name_input)
         
         button_layout = QHBoxLayout()
@@ -913,7 +915,7 @@ class FilenameDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("字幕AI翻譯系統 v0.89.02")
+        self.setWindowTitle("字幕AI翻譯系統")
         self.resize(700, 750)
         self.setMinimumSize(700, 750)  # 設定最小尺寸，防止視窗縮小
         # 視窗大小不鎖定，允許使用者手動放大（如需完全鎖定可加上 self.setMaximumSize(700, 750)）
@@ -1313,8 +1315,15 @@ class MainWindow(QMainWindow):
             
             self.log_message(self.language_manager.get_text("auto_mode_filename_set", "全自動模式: 已自動設定輸出檔名為 {filename}").format(filename=self.output_filename))
         else:
-            # 手動模式：跳出對話框
-            dialog = FilenameDialog(self)
+            # 手動模式：跳出對話框，並帶入預設值
+            file_path_obj = Path(file_name)
+            if self.mode_capcut.isChecked():
+                # CapCut: 使用父目錄名稱作為預設
+                default_name = file_path_obj.parent.name
+            else:
+                # SRT: 使用檔名_ai 作為預設
+                default_name = f"{file_path_obj.stem}_ai"
+            dialog = FilenameDialog(self, default_name=default_name)
             if dialog.exec():
                 self.output_filename = dialog.get_filename()
             else:
@@ -1712,7 +1721,7 @@ class MainWindow(QMainWindow):
 
     def retranslate_ui(self):
         """重新翻譯界面元素"""
-        self.setWindowTitle(self.language_manager.get_text("app_title", "字幕AI翻譯系統 v0.89.02"))
+        self.setWindowTitle(self.language_manager.get_text("app_title", "字幕AI翻譯系統 v0.89.05"))
         self.settings_btn.setText(self.language_manager.get_text("settings_button", "系統設定"))
 
         # 更新各個群組標題

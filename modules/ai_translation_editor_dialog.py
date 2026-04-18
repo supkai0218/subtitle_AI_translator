@@ -1,3 +1,4 @@
+#v0.89.06 修正AI相關參數儲存後，下次開啟無法載入最後選擇的API和模型的問題
 #v0.89.05 新增批次翻譯失敗重試機制、調控空白翻譯閾值
 #v0.89.02 新增介面語言包切換功能(繁中/英文，介面切換進度80%)
 #v0.88.02 一鍵全自動翻譯驗證功能bug fix
@@ -1027,12 +1028,34 @@ class AITranslationEditorDialog(QDialog):
             for setting_name in ai_prompt_data.get("default", {}).get("model_settings", {}):
                 self.model_settings_combo.addItem(setting_name)
 
-            # 預設選擇第一個
-            if self.api_settings_combo.count() > 0:
+            # 讀取上次儲存的選擇
+            last_selected = ai_prompt_data.get("default", {}).get("last_selected", {})
+            last_api = last_selected.get("api", "")
+            last_model = last_selected.get("model", "")
+
+            # 嘗試恢復上次的API選擇，若不存在則選擇第一個
+            if last_api:
+                index = self.api_settings_combo.findText(last_api)
+                if index >= 0:
+                    self.api_settings_combo.setCurrentIndex(index)
+                    self.on_api_setting_changed()
+                elif self.api_settings_combo.count() > 0:
+                    self.api_settings_combo.setCurrentIndex(0)
+                    self.on_api_setting_changed()
+            elif self.api_settings_combo.count() > 0:
                 self.api_settings_combo.setCurrentIndex(0)
                 self.on_api_setting_changed()
 
-            if self.model_settings_combo.count() > 0:
+            # 嘗試恢復上次的模型選擇，若不存在則選擇第一個
+            if last_model:
+                index = self.model_settings_combo.findText(last_model)
+                if index >= 0:
+                    self.model_settings_combo.setCurrentIndex(index)
+                    self.on_model_setting_changed()
+                elif self.model_settings_combo.count() > 0:
+                    self.model_settings_combo.setCurrentIndex(0)
+                    self.on_model_setting_changed()
+            elif self.model_settings_combo.count() > 0:
                 self.model_settings_combo.setCurrentIndex(0)
                 self.on_model_setting_changed()
 
@@ -1114,6 +1137,12 @@ class AITranslationEditorDialog(QDialog):
                 "batch_failed_retry_count": self.batch_failed_retry_count_spinbox.value(),
                 "empty_threshold": self.empty_threshold_spinbox.value() / 100.0,  # v2: 百分比轉小數
             })
+
+            # 更新最後選擇的API和模型
+            if "last_selected" not in ai_prompt_data["default"]:
+                ai_prompt_data["default"]["last_selected"] = {}
+            ai_prompt_data["default"]["last_selected"]["api"] = current_api
+            ai_prompt_data["default"]["last_selected"]["model"] = current_model
 
             with open(get_ai_prompt_path(), "w", encoding="utf-8") as f:
                 json.dump(ai_prompt_data, f, ensure_ascii=False, indent=4)

@@ -45,6 +45,10 @@
             "retry_delay": 4,
             "batch_failed_retry_count": 3,
             "empty_threshold": 0.01
+        },
+        "last_selected": {
+            "api": "API Yi",
+            "model": "(Yi)deepseek-v3-0324"
         }
     },
     "Universal": {
