@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from PyQt6.QtWidgets import QHeaderView; print\\([m for m in dir\\(QHeaderView.ResizeMode\\) if not m.startswith\\('_'\\)]\\)\")"
+    ]
+  }
+}

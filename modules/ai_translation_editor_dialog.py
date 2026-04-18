@@ -1,3 +1,4 @@
+#v0.89.08 加強AI翻譯實時進度監控功能，實時顯示每個批次的狀態、行數、錯誤代碼和總體進度
 #v0.89.07-3 分離設定檔：AI_prompt.json(Prompt模板)、AI_config.json(API翻譯設定)
 #v0.89.07-2 翻譯參數移至每個模型底下；新增模型時套用預設翻譯參數
 #v0.89.07-1 API供應商與模型分組對應，選擇供應商後僅顯示該供應商下的模型
@@ -13,11 +14,14 @@ import sys
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
     QLabel, QTextEdit, QSplitter, QGroupBox, QProgressBar, QMessageBox,
     QComboBox, QLineEdit, QFormLayout, QTabWidget, QWidget, QCheckBox,
-    QSpinBox, QScrollArea, QInputDialog)
+    QSpinBox, QScrollArea, QInputDialog, QTableWidget, QTableWidgetItem,
+    QHeaderView)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QColor
 from pathlib import Path
 from typing import Dict, List, Optional
+from dataclasses import dataclass
+from enum import Enum
 import json
 
 from .ai_translator import AITranslator
@@ -25,6 +29,27 @@ from .ai_validator import TranslationValidator, ValidationStatus
 from .prompt_manager import PromptManager
 from .settings_path import resolve_settings_file, resolve_settings_asset, substitute_env_vars
 import time
+
+
+class BatchStatus(Enum):
+    """批次狀態枚舉"""
+    PENDING = "等待"
+    PROCESSING = "翻譯中"
+    COMPLETED = "完成"
+    FAILED = "失敗"
+    RETRYING = "重試中"
+
+
+@dataclass
+class BatchProgressInfo:
+    """批次進度資訊"""
+    batch_index: int       # 批次索引 (從 1 開始顯示)
+    total_batches: int     # 總批次數
+    total_lines: int       # 總行數
+    batch_size: int        # 此批次行數
+    status: BatchStatus     # 狀態
+    error_code: str = ""   # 失敗代碼 (如有)
+    elapsed_seconds: float = 0  # 已耗費時間 (秒)
 
 def get_ai_prompt_path():
     """取得 AI_prompt.json 路徑（Prompt 模板）"""
@@ -59,7 +84,8 @@ class AITranslationWorker(QThread):
     progress_updated = pyqtSignal(str)
     translation_completed = pyqtSignal(list)
     error_occurred = pyqtSignal(str)
-    
+    batch_progress_updated = pyqtSignal(object)  # 發送 BatchProgressInfo
+
     def __init__(self, ai_config: Dict, text_lines: List[str], context_info: Dict):
         super().__init__()
         self.ai_config = ai_config
@@ -67,14 +93,22 @@ class AITranslationWorker(QThread):
         self.context_info = context_info
         self.translator = None
         self.validator = None
+        self._start_time = None
+        self._batch_size = ai_config.get("batch_size", 10)
+        self._total_lines = len(text_lines)
     
     def run(self):
         try:
+            # 記錄開始時間
+            self._start_time = time.time()
+            # 計算總批次數
+            self._total_batches = (self._total_lines + self._batch_size - 1) // self._batch_size
+
             # 初始化翻譯器和驗證器
             self.progress_updated.emit("初始化AI翻譯器...")
             self.translator = AITranslator(self.ai_config)
             self.validator = TranslationValidator(self.ai_config)
-            
+
             # 驗證API連線
             self.progress_updated.emit("驗證API連線...")
             success, msg = self.translator.validate_api_connection()
@@ -82,24 +116,33 @@ class AITranslationWorker(QThread):
                 self.error_occurred.emit(f"API連線失敗: {msg}")
                 return
             self.progress_updated.emit(f"✓ {msg}")
-            
+
+            # 發射初始批次資訊
+            self._emit_batch_info(0, BatchStatus.PENDING, "")
+
             # 執行翻譯（帶重試機制）
             max_retries = self.ai_config.get("max_retries", 3)
             retry_delay = self.ai_config.get("retry_delay", 2)
-            
+
             for attempt in range(max_retries):
                 self.progress_updated.emit(f"\n翻譯嘗試 {attempt + 1}/{max_retries}...")
-                
+
                 # 調用翻譯器（返回原始響應）
-                success, raw_response, error_msg = self.translator.translate_batch(self.text_lines)
-                
+                success, raw_response, error_msg = self.translator.translate_batch(
+                    self.text_lines,
+                    progress_callback=self._on_translator_progress
+                )
+
+                # 翻譯完成後，發射所有批次的最終狀態
+                self._emit_all_batch_status()
+
                 if not success:
                     self.progress_updated.emit(f"✗ 翻譯失敗: {error_msg}")
                     if attempt < max_retries - 1:
                         self.progress_updated.emit(f"等待 {retry_delay} 秒後重試...")
                         time.sleep(retry_delay)
                     continue
-                
+
                 self.progress_updated.emit("✓ 翻譯完成，驗證結果...")
 
                 # 驗證響應（v2: 區分重翻時機）
@@ -127,21 +170,78 @@ class AITranslationWorker(QThread):
                     if attempt < max_retries - 1:
                         self.progress_updated.emit(f"等待 {retry_delay} 秒後重試...")
                         time.sleep(retry_delay)
-            
+
             # 所有重試都失敗
             self.error_occurred.emit(
                 f"AI翻譯失敗: 經過 {max_retries} 次嘗試後仍無法獲得有效的翻譯結果"
             )
-                
+
         except Exception as e:
             import traceback
             error_msg = f"翻譯過程發生錯誤: {str(e)}\n{traceback.format_exc()}"
             self.error_occurred.emit(error_msg)
 
+    def _on_translator_progress(self, message: str):
+        """翻譯器進度回調"""
+        self.progress_updated.emit(message)
+
+        # 解析批次進度
+        elapsed = time.time() - self._start_time if self._start_time else 0
+
+        # 匹配 "翻譯批次 X/Y" 或 "處理批次 X"
+        import re
+        batch_match = re.search(r'批次\s*(\d+)', message)
+        if batch_match:
+            batch_idx = int(batch_match.group(1)) - 1  # 轉為 0 索引
+            status = BatchStatus.PROCESSING
+            self._emit_batch_info(batch_idx, status, "", elapsed)
+
+    def _emit_batch_info(self, batch_index: int, status: BatchStatus, error_code: str = "", elapsed: float = None):
+        """發射批次進度資訊"""
+        if elapsed is None:
+            elapsed = time.time() - self._start_time if self._start_time else 0
+
+        # 計算此批次的行數範圍
+        start_line = batch_index * self._batch_size
+        end_line = min(start_line + self._batch_size, self._total_lines)
+        batch_size = end_line - start_line
+
+        info = BatchProgressInfo(
+            batch_index=batch_index + 1,  # 顯示從 1 開始
+            total_batches=self._total_batches,
+            total_lines=self._total_lines,
+            batch_size=batch_size,
+            status=status,
+            error_code=error_code,
+            elapsed_seconds=elapsed
+        )
+        self.batch_progress_updated.emit(info)
+
+    def _emit_all_batch_status(self):
+        """發射所有批次的最終狀態"""
+        elapsed = time.time() - self._start_time if self._start_time else 0
+        if hasattr(self, 'translator') and self.translator and hasattr(self.translator, 'batches'):
+            for batch in self.translator.batches:
+                # 轉換 AITranslator 的 BatchStatus 為我們的 BatchStatus
+                if batch.status.value == "pending":
+                    status = BatchStatus.PENDING
+                elif batch.status.value == "processing":
+                    status = BatchStatus.PROCESSING
+                elif batch.status.value == "completed":
+                    status = BatchStatus.COMPLETED
+                elif batch.status.value == "failed":
+                    status = BatchStatus.FAILED
+                elif batch.status.value == "retrying":
+                    status = BatchStatus.RETRYING
+                else:
+                    status = BatchStatus.PENDING
+
+                self._emit_batch_info(batch.index, status, batch.error_message, elapsed)
+
 class TranslationProgressWindow(QDialog):
     """獨立的翻譯進度窗口 - 實時顯示翻譯和驗證進度"""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, total_lines=0, total_batches=0):
         super().__init__(parent)
         # 初始化語言管理器
         from modules.language_manager import LanguageManager
@@ -151,31 +251,86 @@ class TranslationProgressWindow(QDialog):
         if parent and hasattr(parent, 'language_manager'):
             self.language_manager = parent.language_manager
 
+        self.total_lines = total_lines
+        self.total_batches = total_batches
+
         self.setWindowTitle(self.language_manager.get_text("progress_window_title", "AI Translation Progress"))
-        self.resize(600, 500)
+        self.resize(700, 600)
         self.setModal(True)
 
         # 設置窗口始終在最前面
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
 
+        self.batch_data = {}  # 儲存每個批次的狀態
+        self.elapsed_seconds = 0
+
         self.init_ui()
         self.message_count = 0
+
+        # 啟動計時器
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_elapsed_time)
+        self.timer.start(1000)  # 每秒更新
 
     def init_ui(self):
         layout = QVBoxLayout(self)
 
         # 標題
-        title_label = QLabel(self.language_manager.get_text("real_time_monitoring", "Translation Progress Real-time Monitoring"))
+        title_label = QLabel(self.language_manager.get_text("real_time_monitoring", "翻譯進度實時監控"))
         title_font = QFont()
         title_font.setPointSize(12)
         title_font.setBold(True)
         title_label.setFont(title_font)
         layout.addWidget(title_label)
 
-        # 進度消息顯示區域
+        # ===== 摘要資訊區域 =====
+        summary_group = QGroupBox("翻譯摘要")
+        summary_layout = QHBoxLayout()
+
+        # 總行數
+        self.total_lines_label = QLabel(f"總行數: {self.total_lines}")
+        summary_layout.addWidget(self.total_lines_label)
+
+        # 總批次數
+        self.total_batches_label = QLabel(f"總批次數: {self.total_batches}")
+        summary_layout.addWidget(self.total_batches_label)
+
+        # 已耗費時間
+        self.elapsed_label = QLabel("已耗費時間: 0 秒")
+        summary_layout.addWidget(self.elapsed_label)
+
+        summary_group.setLayout(summary_layout)
+        layout.addWidget(summary_group)
+
+        # ===== 批次狀態表格 =====
+        batch_group = QGroupBox("批次翻譯狀態")
+        batch_layout = QVBoxLayout()
+
+        self.batch_table = QTableWidget()
+        self.batch_table.setColumnCount(4)
+        self.batch_table.setHorizontalHeaderLabels(["批次", "狀態", "行數", "錯誤代碼"])
+        # 設置表格屬性
+        self.batch_table.setAlternatingRowColors(True)
+        self.batch_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.batch_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        # 自動調整列寬
+        header = self.batch_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self.batch_table.setColumnWidth(0, 60)
+        self.batch_table.setColumnWidth(2, 60)
+
+        batch_layout.addWidget(self.batch_table)
+        batch_group.setLayout(batch_layout)
+        layout.addWidget(batch_group)
+
+        # 進度消息顯示區域（可折疊或縮小）
         self.progress_text = QTextEdit()
         self.progress_text.setReadOnly(True)
-        self.progress_text.setFont(QFont("Consolas", 10))
+        self.progress_text.setFont(QFont("Consolas", 9))
+        self.progress_text.setMaximumHeight(120)
         layout.addWidget(self.progress_text)
 
         # 進度條
@@ -197,6 +352,73 @@ class TranslationProgressWindow(QDialog):
         button_layout.addWidget(self.cancel_btn)
 
         layout.addLayout(button_layout)
+
+    def update_elapsed_time(self):
+        """更新已耗費時間"""
+        self.elapsed_seconds += 1
+        self.elapsed_label.setText(f"已耗費時間: {self.elapsed_seconds} 秒")
+
+    def update_batch_progress(self, batch_info: BatchProgressInfo):
+        """更新批次進度"""
+        batch_idx = batch_info.batch_index
+
+        # 儲存最新狀態
+        self.batch_data[batch_idx] = batch_info
+
+        # 確保表格有足夠的行
+        if self.batch_table.rowCount() < self.total_batches:
+            self.batch_table.setRowCount(self.total_batches)
+
+        row = batch_idx - 1  # 轉為 0 索引
+
+        # 批次
+        batch_item = QTableWidgetItem(str(batch_idx))
+        batch_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.batch_table.setItem(row, 0, batch_item)
+
+        # 狀態（帶顏色）
+        status_item = QTableWidgetItem(batch_info.status.value)
+        status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        # 根據狀態設置顏色
+        color = self._get_status_color(batch_info.status)
+        status_item.setBackground(QColor(color))
+        self.batch_table.setItem(row, 1, status_item)
+
+        # 行數
+        lines_item = QTableWidgetItem(str(batch_info.batch_size))
+        lines_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.batch_table.setItem(row, 2, lines_item)
+
+        # 錯誤代碼
+        error_item = QTableWidgetItem(batch_info.error_code)
+        error_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.batch_table.setItem(row, 3, error_item)
+
+        # 根據狀態更新進度條
+        self._update_progress_bar()
+
+    def _get_status_color(self, status: BatchStatus) -> str:
+        """根據狀態返回顏色"""
+        colors = {
+            BatchStatus.PENDING: "#E0E0E0",     # 灰色
+            BatchStatus.PROCESSING: "#FFF3E0",  # 橙色
+            BatchStatus.COMPLETED: "#E8F5E9",  # 綠色
+            BatchStatus.FAILED: "#FFEBEE",      # 紅色
+            BatchStatus.RETRYING: "#FFF8E1",    # 黃色
+        }
+        return colors.get(status, "#FFFFFF")
+
+    def _update_progress_bar(self):
+        """根據完成狀態更新進度條"""
+        if not self.batch_data:
+            return
+
+        completed = sum(1 for info in self.batch_data.values() if info.status in (BatchStatus.COMPLETED, BatchStatus.FAILED))
+        total = len(self.batch_data)
+
+        if total > 0:
+            self.progress_bar.setRange(0, total)
+            self.progress_bar.setValue(completed)
 
     def add_progress_message(self, message: str):
         """添加進度消息"""
@@ -884,8 +1106,13 @@ class AITranslationEditorDialog(QDialog):
         self.auto_translate_btn.setEnabled(False)
         self.status_label.setText(self.language_manager.get_text("translation_in_progress", "AI translation in progress..."))
 
+        # 計算總行數和總批次數
+        total_lines = len(self.original_lines)
+        batch_size = self.ai_config.get("batch_size", 10)
+        total_batches = (total_lines + batch_size - 1) // batch_size
+
         # 建立獨立的進度窗口
-        self.progress_window = TranslationProgressWindow(self)
+        self.progress_window = TranslationProgressWindow(self, total_lines=total_lines, total_batches=total_batches)
         self.progress_window.show()
 
         # 建立並啟動翻譯工作執行緒
@@ -894,6 +1121,7 @@ class AITranslationEditorDialog(QDialog):
         )
         self.translation_worker.progress_updated.connect(self.on_translation_progress)
         self.translation_worker.progress_updated.connect(self.progress_window.add_progress_message)
+        self.translation_worker.batch_progress_updated.connect(self.progress_window.update_batch_progress)
         self.translation_worker.translation_completed.connect(self.on_translation_completed)
         self.translation_worker.error_occurred.connect(self.on_translation_error)
         self.translation_worker.start()
