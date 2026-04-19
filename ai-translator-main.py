@@ -1,3 +1,4 @@
+#v0.89.10 main GUI 一鍵翻譯新增檔案複選模式、修正一鍵翻譯無法讀取環境變數API key
 #v0.89.09 新增AI翻譯器調試完成後，將設定寫入一鍵翻譯設定功能
 #v0.89.08 加強AI翻譯實時進度監控功能，實時顯示每個批次的狀態、行數、錯誤代碼和總體進度
 #v0.89.07 AI編輯器:分離設定檔為AI_prompt.json和AI_config.json，並優化API供應商與模型的管理邏輯
@@ -40,6 +41,7 @@ from modules.settings_path import (
     make_portable_path,
     clear_settings_cache,
     update_bootstrap_pointer,
+    substitute_env_vars,
 )
 
 # --- AI翻譯相關模組匯入 ---
@@ -134,6 +136,8 @@ def load_settings():
         try:
             with open(settings_file, "r", encoding="utf-8") as f:
                 settings = json.load(f)
+            # v0.89.10 處理環境變數替換（支援 ${VAR_NAME} 語法）
+            settings = substitute_env_vars(settings)
             settings.setdefault("paths", {})
             settings["paths"]["settings_file"] = make_portable_path(settings_file)
             update_bootstrap_pointer(settings_file)
@@ -1279,11 +1283,12 @@ class MainWindow(QMainWindow):
                 
                 btn_file = choice_dialog.addButton(self.language_manager.get_text("single_file_option", "單一SRT檔案"), QMessageBox.ButtonRole.AcceptRole)
                 btn_folder = choice_dialog.addButton(self.language_manager.get_text("folder_option", "資料夾(批次處理)"), QMessageBox.ButtonRole.AcceptRole)
+                btn_multi = choice_dialog.addButton(self.language_manager.get_text("multi_file_option", "檔案複選"), QMessageBox.ButtonRole.AcceptRole)
                 choice_dialog.addButton(self.language_manager.get_text("cancel_button", "取消"), QMessageBox.ButtonRole.RejectRole)
-                
+
                 choice_dialog.exec()
                 clicked_button = choice_dialog.clickedButton()
-                
+
                 if clicked_button == btn_file:
                     # 選擇單一檔案
                     file_name, _ = QFileDialog.getOpenFileName(self, self.language_manager.get_text("file_dialog_title", "選擇來源 SRT 檔案"), default_dir, "SRT Files (*.srt)")
@@ -1292,6 +1297,12 @@ class MainWindow(QMainWindow):
                     folder_path = QFileDialog.getExistingDirectory(self, self.language_manager.get_text("select_srt_folder", "選擇包含SRT檔案的資料夾"), default_dir)
                     if folder_path:
                         self.scan_and_prepare_batch(folder_path)
+                    return
+                elif clicked_button == btn_multi:
+                    # 選擇多個檔案進行批次處理
+                    file_names, _ = QFileDialog.getOpenFileNames(self, self.language_manager.get_text("multi_file_dialog_title", "選擇多個 SRT 檔案"), default_dir, "SRT Files (*.srt)")
+                    if file_names:
+                        self.prepare_multi_file_batch(file_names)
                     return
                 else:
                     # 取消
@@ -1386,7 +1397,7 @@ class MainWindow(QMainWindow):
         """掃描資料夾中的所有SRT檔案並準備批次處理"""
         try:
             self.log_message(f"正在掃描資料夾: {folder_path}")
-            
+
             # 根據設定選擇掃描方式
             srt_files = []
             if self.include_subfolders:
@@ -1404,39 +1415,85 @@ class MainWindow(QMainWindow):
                 for file in folder_path_obj.iterdir():
                     if file.is_file() and file.name.lower().endswith('.srt'):
                         srt_files.append(file)
-            
+
             if not srt_files:
                 QMessageBox.warning(self, self.language_manager.get_text("warning_title", "警告"), self.language_manager.get_text("no_srt_files_found", "在資料夾 {path} 中未找到任何SRT檔案").format(path=folder_path))
                 return
-            
+
             # 按修改時間排序
             srt_files.sort(key=lambda x: x.stat().st_mtime)
-            
+
             # 顯示確認對話框
             file_list_text = "\n".join([f"{i+1}. {f.name} ({f.parent})" for i, f in enumerate(srt_files[:10])])
             if len(srt_files) > 10:
                 file_list_text += f"\n... 以及其他 {len(srt_files) - 10} 個檔案"
-            
+
             confirm_msg = f"找到 {len(srt_files)} 個SRT檔案:\n\n{file_list_text}\n\n是否開始批次處理?"
             reply = QMessageBox.question(self, self.language_manager.get_text("confirm_batch_title", "確認批次處理"), confirm_msg,
                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            
+
             if reply == QMessageBox.StandardButton.Yes:
                 self.batch_mode = True
                 self.batch_files = srt_files
                 self.current_batch_index = 0
                 self.batch_errors = []
-                
+
                 # 更新UI顯示
                 self.file_label.setText(self.language_manager.get_text("batch_mode_label", "批次模式: {count} 個檔案待處理").format(count=len(srt_files)))
                 self.output_label.setText(self.language_manager.get_text("batch_processing_label", "批次處理模式"))
-                
+
                 self.log_message(self.language_manager.get_text("batch_processing_ready", "批次處理已準備完成,共 {count} 個檔案").format(count=len(srt_files)))
             else:
                 self.log_message("使用者取消批次處理")
-                
+
         except Exception as e:
             self.show_error(f"掃描資料夾時發生錯誤: {e}")
+
+    def prepare_multi_file_batch(self, file_names):
+        """準備已選取的多個SRT檔案進行批次處理"""
+        try:
+            if not file_names:
+                return
+
+            # 將檔案路徑轉換為 Path 物件列表
+            srt_files = [Path(f) for f in file_names]
+
+            # 過濾出 SRT 檔案（以防萬一）
+            srt_files = [f for f in srt_files if f.is_file() and f.suffix.lower() == '.srt']
+
+            if not srt_files:
+                QMessageBox.warning(self, self.language_manager.get_text("warning_title", "警告"),
+                                    self.language_manager.get_text("no_srt_files_selected", "選取的檔案中沒有SRT檔案"))
+                return
+
+            # 按修改時間排序
+            srt_files.sort(key=lambda x: x.stat().st_mtime)
+
+            # 顯示確認對話框
+            file_list_text = "\n".join([f"{i+1}. {f.name}" for i, f in enumerate(srt_files[:10])])
+            if len(srt_files) > 10:
+                file_list_text += f"\n... 以及其他 {len(srt_files) - 10} 個檔案"
+
+            confirm_msg = f"已選取 {len(srt_files)} 個SRT檔案:\n\n{file_list_text}\n\n是否開始批次處理?"
+            reply = QMessageBox.question(self, self.language_manager.get_text("confirm_batch_title", "確認批次處理"), confirm_msg,
+                                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+
+            if reply == QMessageBox.StandardButton.Yes:
+                self.batch_mode = True
+                self.batch_files = srt_files
+                self.current_batch_index = 0
+                self.batch_errors = []
+
+                # 更新UI顯示
+                self.file_label.setText(self.language_manager.get_text("batch_mode_label", "批次模式: {count} 個檔案待處理").format(count=len(srt_files)))
+                self.output_label.setText(self.language_manager.get_text("batch_processing_label", "批次處理模式"))
+
+                self.log_message(self.language_manager.get_text("batch_processing_ready", "批次處理已準備完成,共 {count} 個檔案").format(count=len(srt_files)))
+            else:
+                self.log_message("使用者取消批次處理")
+
+        except Exception as e:
+            self.show_error(f"準備檔案複選批次時發生錯誤: {e}")
 
     def start_processing(self):
         # 檢查批次模式
