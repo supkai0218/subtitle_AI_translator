@@ -1,3 +1,4 @@
+#v0.89.11 main GUI 一鍵翻譯新增API金鑰下拉選單，從.env讀取 *_KEY 變數，並提供自訂輸入框（存入MAIN_API_KEY），避免金鑰直接寫入settings.json
 #v0.89.10 main GUI 一鍵翻譯新增檔案複選模式、修正一鍵翻譯無法讀取環境變數API key
 #v0.89.09 新增AI翻譯器調試完成後，將設定寫入一鍵翻譯設定功能
 #v0.89.08 加強AI翻譯實時進度監控功能，實時顯示每個批次的狀態、行數、錯誤代碼和總體進度
@@ -16,6 +17,7 @@ import os
 import json
 import shutil
 import glob
+import re
 import subprocess
 import copy
 from datetime import datetime
@@ -351,10 +353,22 @@ class SettingsDialog(QDialog):
         self.ai_inputs["api_url"] = QLineEdit(ai_config.get("api_url", "https://openrouter.ai/api/v1/chat/completions"))
         api_layout.addRow(self._get_text("api_url_label", "API網址:"), self.ai_inputs["api_url"])
         
-        # API Key
-        self.ai_inputs["api_key"] = QLineEdit(ai_config.get("api_key", ""))
-        self.ai_inputs["api_key"].setEchoMode(QLineEdit.EchoMode.Password)
-        api_layout.addRow(self._get_text("api_key_label", "API金鑰:"), self.ai_inputs["api_key"])
+        # API Key - 改為從.env讀取的下拉選單，避免金鑰寫入settings.json
+        api_key_layout = QVBoxLayout()
+        api_key_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.ai_inputs["api_key_custom"] = QLineEdit("")
+        self.ai_inputs["api_key_custom"].setEchoMode(QLineEdit.EchoMode.Password)
+        self.ai_inputs["api_key_custom"].setPlaceholderText(self._get_text("api_key_custom_placeholder", "輸入自訂API Key，將存入.env的MAIN_API_KEY..."))
+        self.ai_inputs["api_key_custom"].setVisible(False)
+        api_key_layout.addWidget(self.ai_inputs["api_key_custom"])
+
+        self.ai_inputs["api_key_combo"] = QComboBox()
+        api_key_layout.addWidget(self.ai_inputs["api_key_combo"])
+        self._populate_api_key_combo(ai_config.get("api_key", ""))
+
+        self.ai_inputs["api_key_combo"].currentIndexChanged.connect(self._on_api_key_combo_changed)
+        api_layout.addRow(self._get_text("api_key_label", "API金鑰:"), api_key_layout)
         
         # 模型
         self.ai_inputs["model"] = QLineEdit(ai_config.get("model", "anthropic/claude-3-sonnet"))
@@ -440,6 +454,101 @@ class SettingsDialog(QDialog):
         
         layout.addLayout(form_layout)
 
+    def _populate_api_key_combo(self, current_api_key):
+        """從.env檔案讀取 *_KEY 變數，填入API Key下拉選單"""
+        # 清除並加入預設選項
+        self.ai_inputs["api_key_combo"].clear()
+
+        # 讀取 .env 檔案
+        env_path = Path(__file__).resolve().parent / "settings" / ".env"
+        env_keys = {}  # label -> value
+        if env_path.exists():
+            with open(env_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        key, _, value = line.partition("=")
+                        key = key.strip()
+                        value = value.strip().strip("\"'")
+                        if key.endswith("_KEY") and key != "MAIN_API_KEY":
+                            env_keys[key] = value
+
+        # 加入.env中的 *_KEY 變數
+        selected_index = 0
+        idx = 0
+        for var_name, var_value in env_keys.items():
+            # 顯示名稱: "OPENROUTER_API_KEY (sk-or-v1...abcde)"
+            display_value = var_value
+            if len(display_value) > 16:
+                display_value = display_value[:12] + "..." + display_value[-4:]
+            label = f"{var_name} ({display_value})"
+            self.ai_inputs["api_key_combo"].addItem(label, var_name)
+            # 如果目前設定引用此env變數，預選該項
+            if current_api_key == f"${{{var_name}}}":
+                selected_index = idx
+            elif current_api_key and current_api_key == var_value and not current_api_key.startswith("${"):
+                selected_index = idx
+            idx += 1
+
+        # 加入「自訂 (Custom)」選項
+        self.ai_inputs["api_key_combo"].addItem(
+            self._get_text("api_key_custom_option", "✏️ 自訂 (Custom)"),
+            "__custom__"
+        )
+        custom_index = self.ai_inputs["api_key_combo"].count() - 1
+
+        # 判斷目前key是否為自訂（不在env key清單中）
+        is_custom = False
+        if current_api_key and not current_api_key.startswith("${"):
+            # 檢查是否與已掃到的任一env key值相同（排除 MAIN_API_KEY, 它本身就是自訂寫入的）
+            if not any(v == current_api_key for k, v in env_keys.items() if k != "MAIN_API_KEY"):
+                is_custom = True
+        elif current_api_key and current_api_key.startswith("${MAIN_API_KEY"):
+            is_custom = True
+
+        if is_custom:
+            selected_index = custom_index
+            self.ai_inputs["api_key_combo"].setCurrentIndex(custom_index)
+            self.ai_inputs["api_key_custom"].setText(current_api_key if not current_api_key.startswith("${") else "")
+            self.ai_inputs["api_key_custom"].setVisible(True)
+        else:
+            self.ai_inputs["api_key_combo"].setCurrentIndex(selected_index)
+
+    def _on_api_key_combo_changed(self, index):
+        """API Key下拉選單變更事件"""
+        var_name = self.ai_inputs["api_key_combo"].itemData(index)
+        is_custom = (var_name == "__custom__")
+        self.ai_inputs["api_key_custom"].setVisible(is_custom)
+        if is_custom:
+            self.ai_inputs["api_key_custom"].setFocus()
+
+    def _save_custom_api_key_to_env(self, custom_key):
+        """將自訂API Key存入.env的MAIN_API_KEY"""
+        env_path = Path(__file__).resolve().parent / "settings" / ".env"
+        env_path.parent.mkdir(parents=True, exist_ok=True)
+        if env_path.exists():
+            with open(env_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            # 更新或新增 MAIN_API_KEY
+            if re.search(r'^MAIN_API_KEY\s*=', content, re.MULTILINE):
+                content = re.sub(
+                    r'^MAIN_API_KEY\s*=.*$',
+                    f'MAIN_API_KEY={custom_key}',
+                    content,
+                    flags=re.MULTILINE
+                )
+            else:
+                content += f'\n# Custom API key (from settings dialog)\nMAIN_API_KEY={custom_key}\n'
+        else:
+            content = f'# Custom API key (from settings dialog)\nMAIN_API_KEY={custom_key}\n'
+
+        with open(env_path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+        # 重新載入.env到環境變數
+        from dotenv import load_dotenv
+        load_dotenv(env_path, override=True)
+
     def browse_directory(self, line_edit):
         directory = QFileDialog.getExistingDirectory(self, self._get_text("folder_dialog_title", "選擇目錄"), line_edit.text())
         if directory:
@@ -479,7 +588,7 @@ class SettingsDialog(QDialog):
         ai_defaults = DEFAULT_SETTINGS["ai_translation"]
         self.ai_inputs["api_provider"].setCurrentText(ai_defaults["api_provider"])
         self.ai_inputs["api_url"].setText(ai_defaults["api_url"])
-        self.ai_inputs["api_key"].setText(ai_defaults["api_key"])
+        self._populate_api_key_combo(ai_defaults["api_key"])
         self.ai_inputs["model"].setText(ai_defaults["model"])
         self.ai_inputs["source_language"].setCurrentText(ai_defaults["source_language"])
         self.ai_inputs["target_language"].setCurrentText(ai_defaults["target_language"])
@@ -515,7 +624,19 @@ class SettingsDialog(QDialog):
         # 保存AI翻譯設定
         new_settings["ai_translation"]["api_provider"] = self.ai_inputs["api_provider"].currentText()
         new_settings["ai_translation"]["api_url"] = self.ai_inputs["api_url"].text().strip()
-        new_settings["ai_translation"]["api_key"] = self.ai_inputs["api_key"].text().strip()
+
+        # API Key: 從下拉選單或自訂輸入取得，以env變數形式儲存
+        api_key_var = self.ai_inputs["api_key_combo"].currentData()
+        if api_key_var == "__custom__":
+            # 自訂模式：將輸入的key存入.env的MAIN_API_KEY
+            custom_key = self.ai_inputs["api_key_custom"].text().strip()
+            if custom_key:
+                self._save_custom_api_key_to_env(custom_key)
+            new_settings["ai_translation"]["api_key"] = "${MAIN_API_KEY}"
+        else:
+            # 使用env中的已有 *_KEY 變數
+            new_settings["ai_translation"]["api_key"] = f"${{{api_key_var}}}"
+
         new_settings["ai_translation"]["model"] = self.ai_inputs["model"].text().strip()
         new_settings["ai_translation"]["source_language"] = self.ai_inputs["source_language"].currentText()
         new_settings["ai_translation"]["target_language"] = self.ai_inputs["target_language"].currentText()
@@ -1099,6 +1220,8 @@ class MainWindow(QMainWindow):
             
             self.settings = new_settings
             save_settings(self.settings)
+            # 重新載入以確保env變數（如 ${MAIN_API_KEY}）解析為實際值
+            self.settings = load_settings()
             self.log_message(self.language_manager.get_text("settings_saved", "系統設定已儲存。"))
             
     def on_auto_mode_changed(self, state):

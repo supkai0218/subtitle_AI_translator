@@ -304,5 +304,7 @@
   "select_source_type_title": "Select Source Type",
   "select_source_type_message": "Please select the source type to process:",
   "select_capcut_draft": "Select CapCut draft_content.json",
-  "select_srt_folder": "Select folder containing SRT files"
+  "select_srt_folder": "Select folder containing SRT files",
+  "api_key_custom_option": "✏️ Custom",
+  "api_key_custom_placeholder": "Enter custom API Key, will be saved to MAIN_API_KEY in .env"
 }

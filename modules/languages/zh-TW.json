@@ -405,5 +405,7 @@
   "select_source_type_title": "選擇來源類型",
   "select_source_type_message": "請選擇要處理的來源類型:",
   "select_capcut_draft": "選擇 CapCut 的 draft_content.json",
-  "select_srt_folder": "選擇包含SRT檔案的資料夾"
+  "select_srt_folder": "選擇包含SRT檔案的資料夾",
+  "api_key_custom_option": "✏️ 自訂 (Custom)",
+  "api_key_custom_placeholder": "輸入自訂API Key，將存入.env的MAIN_API_KEY變數"
 }
