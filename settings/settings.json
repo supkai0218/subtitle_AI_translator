@@ -24,7 +24,7 @@
             "system_prompt": "你是字幕翻譯AI，必須嚴格遵守以下格式：\n\n輸入格式：\"{序號}:{日文內容}\"\n輸出格式：\"{序號}:{中文翻譯}\"\n\n重要規則：\n1. 只輸出翻譯結果，不要確認或解釋\n2. 保留輸入中的特殊標記（如[[A-1]]），直接複製到輸出\n3. 嚴格禁止改變輸出格式，必須要有序號\n4. 輸出序號必須與輸入序號對應\n5. 不添加任何額外說明或註解\n6. 務必保持每行開頭的序號不變",
             "user_prompt_template": "請翻譯以下日文字幕為繁體中文。\n\n翻譯要點：\n- 考慮前後字幕的上下文，確保句子完整性\n- 使用台灣日常用語\n- 保持原文的語氣和情感\n- 成人影片語境，使用露骨性器官及性愛詞彙\n\n\n待翻譯內容：\n{subtitle_content}"
         },
-        "api_provider": "API Yi",
+        "api_provider": "custom",
         "api_url": "https://api.apiyi.com/v1/chat/completions",
         "api_key": "${API_YI_KEY}",
         "model": "deepseek-v3-0324",
@@ -35,8 +35,7 @@
         "enable_validation": true,
         "max_retries": 3,
         "retry_delay": 4,
-        "batch_failed_retry_count": 3,
-        "empty_threshold": 0.01
+        "batch_failed_retry_count": 3
     },
     "language": {
         "interface_language": "zh-TW"

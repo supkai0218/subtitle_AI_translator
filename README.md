@@ -1,6 +1,6 @@
 # 字幕AI翻譯系統 (Subtitle AI Translator)
 
-[![版本](https://img.shields.io/badge/版本-v0.89.00-blue.svg)](https://github.com/supkai0218/subtitle_AI_translator)
+[![版本](https://img.shields.io/badge/版本-v0.89.11-blue.svg)](https://github.com/supkai0218/subtitle_AI_translator)
 [![Python](https://img.shields.io/badge/Python-3.8+-green.svg)](https://www.python.org/)
 [![授權](https://img.shields.io/badge/授權-MIT-yellow.svg)](LICENSE)
 
@@ -30,47 +30,14 @@
 - ✅ **AI 手動或自動翻譯**：手動翻譯適用於使用沉浸式翻譯等免費資源的使用者，自動翻譯則整合多種 AI API（OpenRouter、OpenAI、Anthropic 等）
 - ✅ **彈性處理流程**：提供 6 種不同的處理模式，滿足各種需求場景
 - ✅ **特殊詞彙保護**：智慧標記與還原機制，確保專有名詞正確翻譯
-- ✅ **時間碼智慧修正**：自動調整超時字幕的時間長度（v0.89 新增）-->適用於使用Whisper進行語音轉錄時的問題
-- ✅ **批次處理**：支援資料夾批次處理，可遞迴處理子資料夾
+- ✅ **時間碼智慧修正**：自動調整超時字幕的時間長度，適用於 Whisper 語音轉錄場景
+- ✅ **批次處理**：支援資料夾批次處理、檔案複選模式，可遞迴處理子資料夾
 - ✅ **一鍵全自動**：自動化完整流程，無需手動干預
+- ✅ **API 金鑰安全管理**：從 .env 讀取 API 金鑰，避免金鑰寫入設定檔
+- ✅ **多語言介面**：支援繁體中文與英文介面切換
+- ✅ **AI 翻譯實時監控**：即時顯示批次狀態、行數、錯誤碼與總體進度
+- ✅ **批次失敗重試**：自動重試失敗的翻譯批次，提高成功率
 - ✅ **圖形化介面**：直覺的 PyQt6 GUI，易於操作
-
-### 🆕 v0.89.00 更新重點 (2026-01-20)
-
-#### 1B 時間碼過濾及修正功能
-
-本版本在 1B 文字過濾階段新增**時間碼智慧修正功能**，可自動調整超時字幕的時間長度：
-
-- ⏱️ **自動偵測超時字幕**：系統自動計算每個字幕的時間差（結束時間 - 起始時間）
-- ✂️ **智慧修正長度**：當時間差超過設定閾值時，自動調整為目標時長
-- 🎛️ **參數可調**：提供 GUI 介面讓使用者自訂閾值（最大時長）和目標時長
-- 💾 **設定持久化**：參數自動儲存至 settings.json，下次使用保持設定
-- ⚙️ **精確計算**：以毫秒為單位進行時間計算，確保精度
-- 🛡️ **向後相容**：未啟用時行為與舊版完全相同
-
-**適用場景**：
-- 字幕顯示時間過長，需要統一調整
-- 批次處理大量字幕檔案，確保時長一致性
-- 影片剪輯後需要調整字幕時長配合節奏
-
-**使用方式**：
-1. 選擇包含 1B 步驟的流程（如：完整流程、只過濾不翻譯、只過濾且翻譯）
-2. 在「流程預覽」中找到「1B: 文字過濾」
-3. 勾選「☑ 啟用時間碼修正」
-4. 設定「最大時長(秒)」（預設 5.0）和「修正為(秒)」（預設 3.0）
-5. 執行流程，系統會自動修正超時字幕
-
-**範例**：
-- 設定最大時長 5 秒，修正為 3 秒
-- 原始時間碼：`00:00:10,000 --> 00:00:20,000`（10 秒，超過 5 秒）
-- 修正後：`00:00:10,000 --> 00:00:13,000`（調整為 3 秒）
-
-**技術更新**：
-- 新增 [`modules/text_filter.py`](modules/text_filter.py:1) v0.4（升級自 text_filter_v01.py）
-- 主程式升級至 [`ai-translator-main-v0.89.py`](ai-translator-main-v0.89.py:1)
-- settings.json 新增 `text_filter` 設定區塊
-
-詳細技術文件請參考：[`plans/1B_timecode_implementation_summary.md`](plans/1B_timecode_implementation_summary.md:1)
 
 ---
 
@@ -109,12 +76,12 @@
 **步驟 1：系統設定**
 
 首次使用需要配置：
-- API 金鑰（AI 翻譯功能需要）
+- API 金鑰（AI 翻譯功能需要，透過 `settings/.env` 管理）
 - 資料夾路徑（可使用預設值）
 - 翻譯語言設定（來源語言、目標語言）
 - Prompt 模板（可選）
 
-點擊主介面的【系統設定】按鈕進行配置。
+點擊主介面的【系統設定】按鈕進行配置。API 金鑰建議在 `settings/.env` 中定義（如 `OPENROUTER_API_KEY=sk-...`），設定檔會自動引用。
 
 **步驟 2：選擇來源模式**
 
@@ -203,7 +170,7 @@
 ```
 字幕AI翻譯系統
 │
-├── 主程式層 (ai-translator-main-v0.89.py)
+├── 主程式層 (ai-translator-main.py)
 │   ├── GUI 介面 (PyQt6)
 │   ├── 流程控制引擎 (ProcessWorker)
 │   ├── 設定管理系統 (Settings Manager)
@@ -238,7 +205,7 @@
     └── 2B_markers-manager_v0.py (標記資料庫管理器)
 ```
 
-### 3.2 主程式 (ai-translator-main-v0.89.py)
+### 3.2 主程式 (ai-translator-main.py)
 
 **主要類別與功能**：
 
@@ -300,7 +267,8 @@
 **ai_translator.py (AITranslator)**
 - 功能：與 AI API 通訊，執行批次翻譯
 - 支援多種 API 供應商（OpenRouter、OpenAI、Anthropic、Custom）
-- 並行處理、重試機制、錯誤處理
+- 並行處理、批次失敗重試機制、錯誤處理
+- 實時進度監控：即時顯示批次狀態、行數、錯誤碼
 
 **ai_validator.py (TranslationValidator)**
 - 功能：驗證翻譯結果的完整性與格式
@@ -335,7 +303,8 @@
 ├── srt/
 │   └── in/        # SRT 來源檔案
 ├── settings/
-│   └── settings.json     # 系統設定檔
+│   ├── settings.json     # 系統設定檔
+│   └── .env              # API 金鑰與環境變數
 └── *.srt          # 輸出的 SRT 檔案（預設在根目錄）
 ```
 
@@ -613,6 +582,7 @@ sequenceDiagram
 - `batch_size`：每批次處理行數（預設 10）
 - `max_concurrent_requests`：最大並行請求數（預設 5）
 - `max_retries`：最大重試次數（預設 3）
+- `batch_failed_retry_count`：批次失敗重試次數（預設 3）
 - `enable_validation`：啟用結果驗證（預設啟用）
 
 #### 階段 3A：標記還原
@@ -666,8 +636,9 @@ __MARK_001__ 先生將前往 __MARK_002__
 ```
 
 **條件式 raw 版生成**：
-- 如果執行了 1B 階段（過濾），則生成 `*_raw.srt`
+- 如果執行了 1B 階段（過濾），且啟用了原文字幕生成選項，則生成 `*_raw.srt`
 - 使用 `1B-txt` + `1B-time` 生成原文對照字幕
+- 後綴名稱可自訂（預設 `_raw`）
 
 ### 4.4 模組互動關係圖
 
@@ -840,11 +811,8 @@ cd subtitle_AI_translator
 # 安裝依賴套件
 pip install -r requirements.txt
 
-# 執行主程式（最新版）
-python ai-translator-main-v0.89.py
-
-# 或執行舊版本
-python ai-translator-main-v0.88.py
+# 執行主程式
+python ai-translator-main.py
 ```
 
 ### 方法 2：執行檔版本
@@ -878,12 +846,32 @@ python ai-translator-main-v0.88.py
 
 - **paths**：各階段檔案的資料夾路徑
 - **ai_translation**：AI API 設定與參數
-  - `api_provider`：API 供應商
-  - `api_key`：API 金鑰
+  - `api_provider`：API 供應商（openrouter / openai / anthropic / custom）
+  - `api_key`：API 金鑰（以 `${VAR_NAME}` 形式引用 .env 變數）
   - `model`：使用的 AI 模型
   - `source_language`：來源語言
   - `target_language`：目標語言
+  - `batch_size`：每批次處理行數
+  - `max_concurrent_requests`：最大並行請求數
+  - `batch_failed_retry_count`：批次失敗重試次數
   - `prompts`：系統與使用者 Prompt
+- **text_filter**：文字過濾與時間碼修正設定
+  - `timecode_correction_enabled`：是否啟用時間碼修正
+  - `timecode_max_duration`：最大時長閾值（秒）
+  - `timecode_target_duration`：修正目標時長（秒）
+- **raw_subtitle**：原文字幕生成設定
+  - `enabled`：是否生成原文字幕
+  - `suffix`：原文字幕後綴名稱
+- **language**：介面語言設定
+  - `interface_language`：介面語言（zh-TW / en）
+
+### API 金鑰管理
+
+API 金鑰透過 `.env` 檔案管理，避免明文寫入設定檔：
+
+- 在 `settings/.env` 中定義 `*_KEY` 變數（如 `OPENROUTER_API_KEY=sk-...`）
+- 設定檔中以 `${OPENROUTER_API_KEY}` 形式引用
+- 也可在設定對話框中選擇「自訂」直接輸入金鑰，系統會自動存入 `.env` 的 `MAIN_API_KEY`
 
 ---
 
@@ -987,11 +975,51 @@ A：可以：
 
 ---
 
-**最後更新**：2026-01-20 (v0.89.00)
+**最後更新**：2026-06-02 (v0.89.11)
 
 ---
 
 ## 📜 版本歷史
+
+### v0.89.11 (2026-06)
+- 🔐 一鍵翻譯新增 API 金鑰下拉選單，從 .env 讀取 *_KEY 變數
+- ✏️ 提供自訂輸入框，金鑰存入 MAIN_API_KEY，避免明文寫入 settings.json
+
+### v0.89.10 (2026-06)
+- ☑️ 一鍵翻譯新增檔案複選模式，支援多個 SRT 檔案批次處理
+- 🔧 修正一鍵翻譯無法讀取環境變數 API key 的問題
+
+### v0.89.09 (2026-06)
+- 🤖 AI 翻譯器調試完成後，可將設定寫入一鍵翻譯設定
+
+### v0.89.08 (2026-06)
+- 📊 加強 AI 翻譯實時進度監控功能
+- 📈 即時顯示每個批次的狀態、行數、錯誤代碼和總體進度
+
+### v0.89.07 (2026-06)
+- 📄 AI 編輯器分離設定檔為 AI_prompt.json 和 AI_config.json
+- 🔧 優化 API 供應商與模型的管理邏輯
+
+### v0.89.06 (2026-06)
+- 🏷️ 加入預設命名邏輯：CapCut 使用父目錄名稱，SRT 使用檔名_ai
+
+### v0.89.05 (2026-06)
+- 🔁 新增批次翻譯失敗重試機制
+- ⚖️ 調控空白翻譯閾值
+- 📛 移除主檔名版本號
+
+### v0.89.04 (2026-06)
+- 🔧 新增環境變數替換功能，設定檔中可使用 ${VAR_NAME} 引用環境變數
+
+### v0.89.03 (2026-06)
+- 🎵 新增音頻分離獨立工具
+- 📂 其他獨立工具路徑及檔名變更
+
+### v0.89.02 (2026-06)
+- 🌏 新增介面語言包切換功能（繁中/英文）
+
+### v0.89.01 (2026-06)
+- 🔤 新增自訂 3B 流程原文字幕自定義後綴檔名功能
 
 ### v0.89.00 (2026-01-20)
 - ✨ 新增 1B 時間碼過濾及修正功能
