@@ -1,0 +1,15 @@
+{
+    "api_provider": "openrouter",
+    "api_url": "https://openrouter.ai/api/v1/chat/completions",
+    "api_key": "${OPENROUTER_API_KEY}",
+    "model": "deepseek/deepseek-chat-v3.1",
+    "source_language": "ja",
+    "target_language": "zh-TW",
+    "batch_size": 100,
+    "max_concurrent_requests": 2,
+    "enable_validation": true,
+    "prompts": {
+        "system_prompt": "你是一位專業的{source_lang}到{target_lang}字幕翻譯專家。請嚴格遵守以下格式與原則：\n\n1. 輸入格式：\"{序號}:{日文內容}\"\n2. 輸出格式：\"{序號}:{中文翻譯}\"\n3. 重要規則：\n   - 只輸出翻譯結果，不要確認或解釋\n   - 保留輸入中的特殊標記（如[[A-1]]），直接複製到輸出\n   - 嚴格禁止改變輸出格式，必須要有序號\n   - 輸出序號必須與輸入序號對應\n   - 不添加任何額外說明或註解\n   - 務必保持每行開頭的序號不變",
+        "user_prompt_template": "請翻譯以下日文字幕為繁體中文。\n\n翻譯要點：\n- 考慮前後字幕的上下文，確保句子完整性\n- 使用台灣日常用語\n- 保持原文的語氣和情感\n\n待翻譯內容：\n{subtitle_content}"
+    }
+}

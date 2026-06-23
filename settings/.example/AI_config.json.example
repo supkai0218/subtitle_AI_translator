@@ -5,7 +5,7 @@
             "url": "https://openrouter.ai/api/v1/chat/completions",
             "key": "${OPENROUTER_API_KEY}",
             "models": {
-                "(OR)deepseek_v3.1": {
+                "deepseek_v3.1": {
                     "model": "deepseek/deepseek-chat-v3.1",
                     "translation_config": {
                         "source_language": "ja",
@@ -35,48 +35,13 @@
                 }
             }
         },
-        "API Yi": {
-            "provider": "API Yi",
-            "url": "https://api.apiyi.com/v1/chat/completions",
-            "key": "${API_YI_KEY}",
+        "anthropic": {
+            "provider": "anthropic",
+            "url": "https://api.anthropic.com/v1/messages",
+            "key": "${ANTHROPIC_API_KEY}",
             "models": {
-                "(Yi)deepseek-v3-0324": {
-                    "model": "deepseek-v3-0324",
-                    "translation_config": {
-                        "source_language": "ja",
-                        "target_language": "zh-TW",
-                        "batch_size": 50,
-                        "max_concurrent_requests": 4,
-                        "enable_validation": true,
-                        "max_retries": 2,
-                        "retry_delay": 4,
-                        "batch_failed_retry_count": 3,
-                        "empty_threshold": 0.01
-                    }
-                },
-                "(Yi)qwen3.5-flash-2026-02-23": {
-                    "model": "qwen3.5-flash-2026-02-23",
-                    "translation_config": {
-                        "source_language": "ja",
-                        "target_language": "zh-TW",
-                        "batch_size": 100,
-                        "max_concurrent_requests": 4,
-                        "enable_validation": true,
-                        "max_retries": 3,
-                        "retry_delay": 4,
-                        "batch_failed_retry_count": 3,
-                        "empty_threshold": 0.01
-                    }
-                }
-            }
-        },
-        "FreedomGPT": {
-            "provider": "FreedomGPT",
-            "url": "https://chat.freedomgpt.com/api/v1/chat/completions",
-            "key": "${FREEDOMGPT_KEY}",
-            "models": {
-                "(FG)deepseek_v3.2": {
-                    "model": "deepseek-v3.2",
+                "claude_3_5_sonnet": {
+                    "model": "claude-3-5-sonnet-20241022",
                     "translation_config": {
                         "source_language": "ja",
                         "target_language": "zh-TW",

@@ -1,0 +1,52 @@
+{
+    "paths": {
+        "capcut_drafts_dir": "${PROJECT_ROOT}/drafts",
+        "txt_1A": "${PROJECT_ROOT}/temp/1A",
+        "txt_1B": "${PROJECT_ROOT}/temp/1B",
+        "txt_1C": "${PROJECT_ROOT}/temp/1C",
+        "txt_2B": "${PROJECT_ROOT}/temp/2B",
+        "txt_3A": "${PROJECT_ROOT}/temp/3A",
+        "ai": "${PROJECT_ROOT}/temp/output",
+        "json_capcut": "${PROJECT_ROOT}/temp/capcut",
+        "json_bak_markers": "${PROJECT_ROOT}/backup/markers",
+        "srt_input": "${PROJECT_ROOT}/srt/in",
+        "srt_output": "${PROJECT_ROOT}/output/srt",
+        "markers_db": "${SETTINGS_DIR}/markers_db.json",
+        "script_2A": "${TOOL_DIR}/2A_prompt-manager.py",
+        "script_2B": "${TOOL_DIR}/2B_markers-manager.py",
+        "script_1B_filter": "${TOOL_DIR}/1B_filter_patterns_editor.py",
+        "filter_patterns_db": "${SETTINGS_DIR}/filter_patterns.json",
+        "prompt_templates_db": "${SETTINGS_DIR}/prompt_templates.json",
+        "settings_file": "settings/settings.json"
+    },
+    "ai_translation": {
+        "api_provider": "openrouter",
+        "api_url": "https://openrouter.ai/api/v1/chat/completions",
+        "api_key": "${OPENROUTER_API_KEY}",
+        "model": "deepseek/deepseek-chat-v3.1",
+        "source_language": "ja",
+        "target_language": "zh-TW",
+        "batch_size": 100,
+        "max_concurrent_requests": 2,
+        "enable_validation": true,
+        "max_retries": 3,
+        "retry_delay": 2,
+        "batch_failed_retry_count": 3,
+        "prompts": {
+            "system_prompt": "",
+            "user_prompt_template": ""
+        }
+    },
+    "text_filter": {
+        "timecode_correction_enabled": false,
+        "timecode_max_duration": 5.0,
+        "timecode_target_duration": 3.0
+    },
+    "raw_subtitle": {
+        "enabled": true,
+        "suffix": "_raw"
+    },
+    "language": {
+        "interface_language": "zh-TW"
+    }
+}

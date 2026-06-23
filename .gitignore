@@ -1,9 +1,55 @@
-/json/
+# === 私人配置檔案（勿上傳 GitHub）===
+settings/settings.json
+settings/AI_prompt.json
+settings/AI_config.json
 settings/.env
-/modules/__pycache__/
-/doc/
-/plans/
-/output/
-*.pyc
-*.pyo
-*.pyd
+settings/markers_db.json
+settings/filter_patterns.json
+settings/prompt.json
+
+# === 本地備份和快取 ===
+settings/bak_filters/
+temp/
+backup/
+ai/
+json/
+
+# === 環境變數 ===
+.env
+.env.local
+.env.*.local
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# === IDE ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.kilo
+
+# === other ===
+doc/
+plans/
