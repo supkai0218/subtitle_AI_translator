@@ -1,3 +1,4 @@
+#v0.89.12 設定檔公私分離，偵測settings資料夾是否需要初始化
 #v0.89.11 main GUI 一鍵翻譯新增API金鑰下拉選單，從.env讀取 *_KEY 變數，並提供自訂輸入框（存入MAIN_API_KEY），避免金鑰直接寫入settings.json
 #v0.89.10 main GUI 一鍵翻譯新增檔案複選模式、修正一鍵翻譯無法讀取環境變數API key
 #v0.89.09 新增AI翻譯器調試完成後，將設定寫入一鍵翻譯設定功能
@@ -1210,6 +1211,49 @@ class MainWindow(QMainWindow):
         layout.addWidget(run_group)
 
     def open_settings_dialog(self):
+        # 在打開設定前檢查 settings 目錄是否有必要的設定檔，若缺少則詢問是否從 .example 初始化
+        settings_dir = Path(__file__).resolve().parent / "settings"
+        required_files = [
+            "settings.json",
+            "AI_config.json",
+            "AI_prompt.json",
+            "filter_patterns.json",
+            "markers_db.json",
+            "prompt_templates.json",
+            "prompt.json",
+            ".env"
+        ]
+
+        missing = [f for f in required_files if not (settings_dir / f).exists()]
+
+        if missing:
+            msg = self.language_manager.get_text("init_settings_prompt",
+                                               "偵測到部分設定檔不存在，是否要從 settings/.example 初始化？\n缺少：{files}")
+            reply = QMessageBox.question(self, self.language_manager.get_text("confirm", "確認"),
+                                         msg.format(files="\n".join(missing)),
+                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+
+            if reply == QMessageBox.StandardButton.Yes:
+                example_dir = settings_dir / ".example"
+                copied_any = False
+                for fname in required_files:
+                    src = example_dir / f"{fname}.example"
+                    dst = settings_dir / fname
+                    try:
+                        if src.exists():
+                            shutil.copy2(src, dst)
+                            copied_any = True
+                    except Exception as e:
+                        QMessageBox.warning(self, self.language_manager.get_text("error", "錯誤"),
+                                            self.language_manager.get_text("init_copy_failed", "複製範例檔案失敗：{err}").format(err=str(e)))
+                if copied_any:
+                    QMessageBox.information(self, self.language_manager.get_text("done", "完成"),
+                                            self.language_manager.get_text("init_done", "已從 .example 初始化設定檔，將開啟系統設定。"))
+                else:
+                    QMessageBox.warning(self, self.language_manager.get_text("warning", "警告"),
+                                        self.language_manager.get_text("no_examples", "找不到 .example 範例檔，無法完成初始化。"))
+                # 無論是否成功，都繼續開啟設定對話框以供使用者調整
+
         dialog = SettingsDialog(self.settings, self, language_manager=self.language_manager)
         if dialog.exec():
             new_settings = dialog.get_settings()
@@ -1217,7 +1261,7 @@ class MainWindow(QMainWindow):
             if self.settings.get("language", {}).get("interface_language") != new_settings.get("language", {}).get("interface_language"):
                 self.language_manager.load_language(new_settings.get("language", {}).get("interface_language", "zh-TW"))
                 self.retranslate_ui()  # 重新翻譯界面
-            
+
             self.settings = new_settings
             save_settings(self.settings)
             # 重新載入以確保env變數（如 ${MAIN_API_KEY}）解析為實際值

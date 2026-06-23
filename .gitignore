@@ -6,6 +6,7 @@ settings/.env
 settings/markers_db.json
 settings/filter_patterns.json
 settings/prompt.json
+settings/prompt_templates.json
 
 # === 本地備份和快取 ===
 settings/bak_filters/

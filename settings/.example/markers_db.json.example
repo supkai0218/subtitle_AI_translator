@@ -1,14 +1,14 @@
 {
     "A": {
-        "description": "行為/狀態相關",
+        "description": "人名",
         "items": {
             "A-1": {
                 "jp": [
                     "example_jp_word_1",
                     "example_jp_word_2"
                 ],
-                "input_zh": "直接對應中文",
-                "zh": "中性描述用詞",
+                "input_zh": "對應中文",
+                "zh": "譯名",
                 "time": "2026-06-23"
             },
             "A-2": {
@@ -22,14 +22,14 @@
         }
     },
     "B": {
-        "description": "器官/身體部位相關",
+        "description": "特殊詞彙",
         "items": {
             "B-1": {
                 "jp": [
                     "example_jp_body_part"
                 ],
                 "input_zh": "直接對應中文",
-                "zh": "中性描述用詞",
+                "zh": "描述用詞",
                 "time": "2026-06-23"
             }
         }
