@@ -1,4 +1,5 @@
-#v0.89.13 新增 3C-1 輸出SRT檔案資料夾流程(來源檔資料夾/備份資料夾)，SRT輸出資料夾更名為SRT備份資料夾
+#v0.89.13 新增 3C-2 檔名後綴編輯流程，修正SRT來源模式輸出檔名衝突問題，放大視窗
+#v0.89.13a 新增 3C-1 輸出SRT檔案資料夾流程(來源檔資料夾/備份資料夾)，SRT輸出資料夾更名為SRT備份資料夾
 #v0.89.12 設定檔公私分離，偵測settings資料夾是否需要初始化
 #v0.89.11 main GUI 一鍵翻譯新增API金鑰下拉選單，從.env讀取 *_KEY 變數，並提供自訂輸入框（存入MAIN_API_KEY），避免金鑰直接寫入settings.json
 #v0.89.10 main GUI 一鍵翻譯新增檔案複選模式、修正一鍵翻譯無法讀取環境變數API key
@@ -58,27 +59,27 @@ from modules.ai_translation_editor_dialog import AITranslationEditorDialog
 FLOWS = {
     "full_flow": {
         "name": "完整流程 (過濾->標記->翻譯)",
-        "steps": ["1A", "1B", "1C", "1D", "2C", "3A", "3B", "3C-1"]
+        "steps": ["1A", "1B", "1C", "1D", "2C", "3A", "3B", "3C-1", "3C-2"]
     },
     "parse_only": {
         "name": "字幕轉換解析 (僅生成SRT)",
-        "steps": ["1A", "3B", "3C-1"]
+        "steps": ["1A", "3B", "3C-1", "3C-2"]
     },
     "translate_raw": {
         "name": "原字幕翻譯 (不過濾不標記)",
-        "steps": ["1A", "1D", "2C", "3B", "3C-1"]
+        "steps": ["1A", "1D", "2C", "3B", "3C-1", "3C-2"]
     },
     "filter_only": {
         "name": "只過濾不翻譯",
-        "steps": ["1A", "1B", "3B", "3C-1"]
+        "steps": ["1A", "1B", "3B", "3C-1", "3C-2"]
     },
     "filter_translate": {
         "name": "只過濾且翻譯",
-        "steps": ["1A", "1B", "1D", "2C", "3B", "3C-1"]
+        "steps": ["1A", "1B", "1D", "2C", "3B", "3C-1", "3C-2"]
     },
     "mark_translate": {
         "name": "只標記且翻譯 (不過濾)",
-        "steps": ["1A", "1C", "1D", "2C", "3A", "3B", "3C-1"]
+        "steps": ["1A", "1C", "1D", "2C", "3A", "3B", "3C-1", "3C-2"]
     }
 }
 
@@ -669,6 +670,7 @@ class ProcessWorker(QThread):
         super().__init__()
         self.main_window = main_window
         self.input_file = None
+        self.original_source_file = None  # 使用者原始來源檔案路徑（未經複製的工作路徑）
         self.output_filename = None
         self.source_mode = "capcut"
         self.flow_mode = "full_flow"
@@ -676,8 +678,9 @@ class ProcessWorker(QThread):
         self.ai_folder_opened = False
         self.auto_mode = False
 
-    def set_task(self, input_file, output_filename, source_mode, flow_mode, auto_mode=False):
+    def set_task(self, input_file, output_filename, source_mode, flow_mode, auto_mode=False, original_source_file=None):
         self.input_file = input_file
+        self.original_source_file = original_source_file
         self.output_filename = output_filename
         self.source_mode = source_mode
         self.flow_mode = flow_mode
@@ -712,21 +715,25 @@ class ProcessWorker(QThread):
                 self.run_3A_replace_markers()
                 self.log(f"[診斷] 3A完成，準備執行3B")
                 self.run_3B_merge(text_stage='3A', time_stage='1B')
+                self.run_3C2_suffix()
                 self.run_3C1_output()
             
             elif self.flow_mode == "parse_only":
                 self.run_3B_merge(text_stage='1A', time_stage='1A')
+                self.run_3C2_suffix()
                 self.run_3C1_output()
 
             elif self.flow_mode == "translate_raw":
                 self.run_1D_copy_for_ai(from_stage='1A')
                 self.run_2C_get_translation()
                 self.run_3B_merge(text_stage='2B', time_stage='1A')
+                self.run_3C2_suffix()
                 self.run_3C1_output()
 
             elif self.flow_mode == "filter_only":
                 self.run_1B_filter()
                 self.run_3B_merge(text_stage='1B', time_stage='1B')
+                self.run_3C2_suffix()
                 self.run_3C1_output()
 
             elif self.flow_mode == "filter_translate":
@@ -734,6 +741,7 @@ class ProcessWorker(QThread):
                 self.run_1D_copy_for_ai(from_stage='1B')
                 self.run_2C_get_translation()
                 self.run_3B_merge(text_stage='2B', time_stage='1B')
+                self.run_3C2_suffix()
                 self.run_3C1_output()
             
             elif self.flow_mode == "mark_translate":
@@ -742,6 +750,7 @@ class ProcessWorker(QThread):
                 self.run_2C_get_translation()
                 self.run_3A_replace_markers()
                 self.run_3B_merge(text_stage='3A', time_stage='1A')
+                self.run_3C2_suffix()
                 self.run_3C1_output()
             
             self.progress_updated.emit(100, "流程處理完成!")
@@ -968,6 +977,46 @@ class ProcessWorker(QThread):
 
         self.log(f"3B: SRT檔案生成完成。")
 
+    def run_3C2_suffix(self):
+        """3C-2: 根據設定對生成的 SRT 檔名進行後綴移除/新增（在 AI 交換資料夾中更名）"""
+        self.progress_updated.emit(93, "執行 3C-2: 檔名後綴編輯...")
+        generated = getattr(self, 'generated_srt_files', [])
+        if not generated:
+            self.log("資訊: 3C-2 無已生成的 SRT 檔案，跳過後綴編輯。")
+            return
+
+        remove_text = self.main_window.srt_suffix_remove
+        add_text = self.main_window.srt_suffix_add
+
+        if not remove_text and not add_text:
+            return
+
+        new_files = []
+        for srt_file in generated:
+            new_stem = srt_file.stem
+            if remove_text:
+                if new_stem.endswith(remove_text):
+                    new_stem = new_stem[: -len(remove_text)]
+                    self.log(self.main_window.language_manager.get_text(
+                        "srt_suffix_remove_applied",
+                        "已移除後綴文字 '{text}'，檔名變更為: {name}").format(text=remove_text, name=new_stem + srt_file.suffix))
+                else:
+                    # 移除文字與檔名後綴不符：仍需輸出，改以備份資料夾替代（來源輸出將跳過該檔）
+                    self.log(self.main_window.language_manager.get_text(
+                        "srt_suffix_remove_fail",
+                        "檔名後綴與移除文字不符，無法寫入來源資料夾: {name}").format(name=srt_file.name))
+            if add_text:
+                new_stem = new_stem + add_text
+                self.log(self.main_window.language_manager.get_text(
+                    "srt_suffix_add_applied",
+                    "已新增後綴文字 '{text}'，檔名變更為: {name}").format(text=add_text, name=new_stem + srt_file.suffix))
+            new_path = srt_file.with_name(new_stem + srt_file.suffix)
+            if new_path != srt_file:
+                shutil.move(str(srt_file), str(new_path))
+            new_files.append(new_path)
+
+        self.generated_srt_files = new_files
+
     def run_3C1_output(self):
         """3C-1: 根據勾選狀態將生成的 SRT 輸出至來源檔資料夾及/或備份資料夾"""
         self.progress_updated.emit(95, "執行 3C-1: 輸出SRT檔案資料夾...")
@@ -985,12 +1034,19 @@ class ProcessWorker(QThread):
                 "警告: 3C-1 未選擇任何輸出資料夾，SRT僅保留於AI交換資料夾。"))
             return
 
-        # 來源檔資料夾：與輸入檔案相同目錄
-        if output_source and self.input_file:
-            source_dir = Path(self.input_file).parent
+        # 來源檔資料夾：使用者原始來源檔案所在目錄（非 srt/in 工作複本）
+        if output_source and (self.original_source_file or self.input_file):
+            src_ref = self.original_source_file or self.input_file
+            source_dir = Path(src_ref).parent
             source_dir.mkdir(parents=True, exist_ok=True)
             for srt_file in generated:
                 dst = source_dir / srt_file.name
+                # 僅避免將檔案複製到自身（來源資料夾與 AI 交換資料夾相同時）
+                if dst.resolve() == Path(srt_file).resolve():
+                    self.log(self.main_window.language_manager.get_text(
+                        "srt_output_source_same",
+                        "來源資料夾與 AI 交換資料夾相同，略過複製: {name}").format(name=srt_file.name))
+                    continue
                 shutil.copy2(srt_file, dst)
             self.log(self.main_window.language_manager.get_text(
                 "srt_output_source_done",
@@ -1092,8 +1148,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("字幕AI翻譯系統")
-        self.resize(700, 750)
-        self.setMinimumSize(700, 750)  # 設定最小尺寸，防止視窗縮小
+        self.resize(820, 880)
+        self.setMinimumSize(820, 880)  # 設定最小尺寸，防止視窗縮小
         # 視窗大小不鎖定，允許使用者手動放大（如需完全鎖定可加上 self.setMaximumSize(700, 750)）
         self.output_filename = None
         self.settings = load_settings()
@@ -1122,6 +1178,11 @@ class MainWindow(QMainWindow):
         srt_output_config = self.settings.get("srt_output", {})
         self.srt_output_source_enabled = srt_output_config.get("source_folder", False)
         self.srt_output_backup_enabled = srt_output_config.get("backup_folder", True)
+
+        # 新增：3C-2 檔名後綴編輯設定(移除後綴/新增後綴)
+        srt_suffix_config = self.settings.get("srt_suffix", {})
+        self.srt_suffix_remove = srt_suffix_config.get("remove", "")
+        self.srt_suffix_add = srt_suffix_config.get("add", "")
         
         # 批次處理相關屬性
         self.batch_mode = False  # 是否為批次處理模式
@@ -1147,7 +1208,8 @@ class MainWindow(QMainWindow):
             "2C": self.language_manager.get_text("step_2c", "2C: AI自動翻譯或手動翻譯"),
             "3A": self.language_manager.get_text("step_3a", "3A: 標記文字還原"),
             "3B": self.language_manager.get_text("step_3b", "3B: 生成SRT檔案 (翻譯+原文)"),
-            "3C-1": self.language_manager.get_text("step_3c1", "3C-1: 輸出SRT檔案資料夾")
+            "3C-1": self.language_manager.get_text("step_3c1", "3C-1: 輸出SRT檔案資料夾"),
+            "3C-2": self.language_manager.get_text("step_3c2", "3C-2: 檔名後綴編輯")
         }
 
     def setup_ui(self):
@@ -1445,6 +1507,28 @@ class MainWindow(QMainWindow):
 
                     srt_output_layout.addStretch()
                     self.workflow_preview_layout.addLayout(srt_output_layout)
+                elif step_id == "3C-2":
+                    # 為 3C-2 步驟添加檔名後綴編輯輸入框
+                    label = QLabel(desc)
+                    self.workflow_preview_layout.addWidget(label)
+
+                    srt_suffix_layout = QHBoxLayout()
+                    srt_suffix_layout.addSpacing(20)  # 縮排
+
+                    srt_suffix_layout.addWidget(QLabel(self.language_manager.get_text("srt_suffix_remove_label", "移除後綴文字:")))
+                    self.srt_suffix_remove_input = QLineEdit(self.srt_suffix_remove)
+                    self.srt_suffix_remove_input.setMaximumWidth(120)
+                    self.srt_suffix_remove_input.textChanged.connect(self.on_srt_suffix_remove_changed)
+                    srt_suffix_layout.addWidget(self.srt_suffix_remove_input)
+
+                    srt_suffix_layout.addWidget(QLabel(self.language_manager.get_text("srt_suffix_add_label", "新增後綴文字:")))
+                    self.srt_suffix_add_input = QLineEdit(self.srt_suffix_add)
+                    self.srt_suffix_add_input.setMaximumWidth(120)
+                    self.srt_suffix_add_input.textChanged.connect(self.on_srt_suffix_add_changed)
+                    srt_suffix_layout.addWidget(self.srt_suffix_add_input)
+
+                    srt_suffix_layout.addStretch()
+                    self.workflow_preview_layout.addLayout(srt_suffix_layout)
                 else:
                     self.workflow_preview_layout.addWidget(QLabel(desc))
 
@@ -1517,6 +1601,33 @@ class MainWindow(QMainWindow):
         # 保存設定
         self.settings.setdefault("srt_output", {})
         self.settings["srt_output"]["backup_folder"] = self.srt_output_backup_enabled
+        save_settings(self.settings)
+
+    def on_srt_suffix_remove_changed(self, text):
+        """3C-2 移除後綴文字變更事件；若有填寫則強制勾選備份資料夾"""
+        self.srt_suffix_remove = text.strip()
+        self.log_message(self.language_manager.get_text("srt_suffix_remove_status", "移除後綴文字: {text}").format(text=self.srt_suffix_remove or "-"))
+
+        # 當填寫移除後綴文字時，強制勾選 3C-1 備份資料夾作為替代輸出
+        if self.srt_suffix_remove and not self.srt_output_backup_enabled:
+            self.srt_output_backup_enabled = True
+            if hasattr(self, 'srt_output_backup_checkbox'):
+                self.srt_output_backup_checkbox.setChecked(True)
+            self.log_message(self.language_manager.get_text("srt_suffix_force_backup", "已強制勾選備份資料夾作為替代輸出"))
+
+        # 保存設定
+        self.settings.setdefault("srt_suffix", {})
+        self.settings["srt_suffix"]["remove"] = self.srt_suffix_remove
+        save_settings(self.settings)
+
+    def on_srt_suffix_add_changed(self, text):
+        """3C-2 新增後綴文字變更事件"""
+        self.srt_suffix_add = text.strip()
+        self.log_message(self.language_manager.get_text("srt_suffix_add_status", "新增後綴文字: {text}").format(text=self.srt_suffix_add or "-"))
+
+        # 保存設定
+        self.settings.setdefault("srt_suffix", {})
+        self.settings["srt_suffix"]["add"] = self.srt_suffix_add
         save_settings(self.settings)
 
     def select_file(self):
@@ -1649,6 +1760,7 @@ class MainWindow(QMainWindow):
                 self.file_label.setText(self.language_manager.get_text("file_label_selected", "來源檔案: {path}").format(path=dest_path))
                 self.output_label.setText(self.language_manager.get_text("output_label_set", "輸出檔名: {filename}").format(filename=self.output_filename))
                 self.worker.input_file = assigned_input_path
+                self.worker.original_source_file = file_name  # 保留使用者原始來源檔案路徑
                 self.worker.output_filename = self.output_filename
                 
                 self.log_message(self.language_manager.get_text("file_selected_log", "已選擇檔案: {file}").format(file=file_name))
@@ -1757,7 +1869,28 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.show_error(f"準備檔案複選批次時發生錯誤: {e}")
 
+    def validate_3c2_required(self):
+        """驗證 3C-1 來源檔資料夾啟用時，3C-2 必須至少選擇一種後綴修改方式"""
+        flow_mode = self.flow_combo.currentData()
+        flow_steps = FLOWS.get(flow_mode, {}).get("steps", [])
+        if "3C-1" not in flow_steps or "3C-2" not in flow_steps:
+            return True
+        if not self.srt_output_source_enabled:
+            return True
+        if self.srt_suffix_remove or self.srt_suffix_add:
+            return True
+        QMessageBox.warning(
+            self,
+            self.language_manager.get_text("srt_suffix_validation_title", "需要設定 3C-2 檔名後綴"),
+            self.language_manager.get_text("srt_suffix_validation_msg",
+                "已勾選 3C-1 來源檔資料夾，請先在 3C-2 選擇一種檔名後綴修改方式（移除或新增後綴），以避免與來源檔案名稱衝突。"))
+        return False
+
     def start_processing(self):
+        # 檢查 3C-2 後綴設定（避免來源檔案名稱衝突）
+        if not self.validate_3c2_required():
+            return
+
         # 檢查批次模式
         if self.batch_mode:
             if not self.batch_files:
@@ -1786,7 +1919,7 @@ class MainWindow(QMainWindow):
         
         source_mode = "capcut" if self.mode_capcut.isChecked() else "srt"
         flow_mode = self.flow_combo.currentData()
-        self.worker.set_task(self.worker.input_file, self.output_filename, source_mode, flow_mode, auto_mode=self.one_click_auto_mode)
+        self.worker.set_task(self.worker.input_file, self.output_filename, source_mode, flow_mode, auto_mode=self.one_click_auto_mode, original_source_file=self.worker.original_source_file)
 
         self.run_btn.setEnabled(False)
         self.file_btn.setEnabled(False)
@@ -1836,7 +1969,7 @@ class MainWindow(QMainWindow):
             # 設定worker並開始處理
             source_mode = "srt"
             flow_mode = self.flow_combo.currentData()
-            self.worker.set_task(assigned_input_path, self.output_filename, source_mode, flow_mode, auto_mode=self.one_click_auto_mode)
+            self.worker.set_task(assigned_input_path, self.output_filename, source_mode, flow_mode, auto_mode=self.one_click_auto_mode, original_source_file=str(current_file))
             self.worker.start()
             
         except Exception as e:
