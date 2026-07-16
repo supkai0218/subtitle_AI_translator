@@ -1,3 +1,4 @@
+#v0.89.13 新增 3C-1 輸出SRT檔案資料夾流程(來源檔資料夾/備份資料夾)，SRT輸出資料夾更名為SRT備份資料夾
 #v0.89.12 設定檔公私分離，偵測settings資料夾是否需要初始化
 #v0.89.11 main GUI 一鍵翻譯新增API金鑰下拉選單，從.env讀取 *_KEY 變數，並提供自訂輸入框（存入MAIN_API_KEY），避免金鑰直接寫入settings.json
 #v0.89.10 main GUI 一鍵翻譯新增檔案複選模式、修正一鍵翻譯無法讀取環境變數API key
@@ -57,27 +58,27 @@ from modules.ai_translation_editor_dialog import AITranslationEditorDialog
 FLOWS = {
     "full_flow": {
         "name": "完整流程 (過濾->標記->翻譯)",
-        "steps": ["1A", "1B", "1C", "1D", "2C", "3A", "3B"]
+        "steps": ["1A", "1B", "1C", "1D", "2C", "3A", "3B", "3C-1"]
     },
     "parse_only": {
         "name": "字幕轉換解析 (僅生成SRT)",
-        "steps": ["1A", "3B"]
+        "steps": ["1A", "3B", "3C-1"]
     },
     "translate_raw": {
         "name": "原字幕翻譯 (不過濾不標記)",
-        "steps": ["1A", "1D", "2C", "3B"]
+        "steps": ["1A", "1D", "2C", "3B", "3C-1"]
     },
     "filter_only": {
         "name": "只過濾不翻譯",
-        "steps": ["1A", "1B", "3B"]
+        "steps": ["1A", "1B", "3B", "3C-1"]
     },
     "filter_translate": {
         "name": "只過濾且翻譯",
-        "steps": ["1A", "1B", "1D", "2C", "3B"]
+        "steps": ["1A", "1B", "1D", "2C", "3B", "3C-1"]
     },
     "mark_translate": {
         "name": "只標記且翻譯 (不過濾)",
-        "steps": ["1A", "1C", "1D", "2C", "3A", "3B"]
+        "steps": ["1A", "1C", "1D", "2C", "3A", "3B", "3C-1"]
     }
 }
 
@@ -711,24 +712,29 @@ class ProcessWorker(QThread):
                 self.run_3A_replace_markers()
                 self.log(f"[診斷] 3A完成，準備執行3B")
                 self.run_3B_merge(text_stage='3A', time_stage='1B')
+                self.run_3C1_output()
             
             elif self.flow_mode == "parse_only":
                 self.run_3B_merge(text_stage='1A', time_stage='1A')
+                self.run_3C1_output()
 
             elif self.flow_mode == "translate_raw":
                 self.run_1D_copy_for_ai(from_stage='1A')
                 self.run_2C_get_translation()
                 self.run_3B_merge(text_stage='2B', time_stage='1A')
+                self.run_3C1_output()
 
             elif self.flow_mode == "filter_only":
                 self.run_1B_filter()
                 self.run_3B_merge(text_stage='1B', time_stage='1B')
+                self.run_3C1_output()
 
             elif self.flow_mode == "filter_translate":
                 self.run_1B_filter()
                 self.run_1D_copy_for_ai(from_stage='1B')
                 self.run_2C_get_translation()
                 self.run_3B_merge(text_stage='2B', time_stage='1B')
+                self.run_3C1_output()
             
             elif self.flow_mode == "mark_translate":
                 self.run_1C_mark(from_stage='1A')
@@ -736,6 +742,7 @@ class ProcessWorker(QThread):
                 self.run_2C_get_translation()
                 self.run_3A_replace_markers()
                 self.run_3B_merge(text_stage='3A', time_stage='1A')
+                self.run_3C1_output()
             
             self.progress_updated.emit(100, "流程處理完成!")
             self.process_complete.emit()
@@ -916,8 +923,8 @@ class ProcessWorker(QThread):
         
     def run_3B_merge(self, text_stage, time_stage):
         self.progress_updated.emit(90, f"執行 3B: 合併SRT (文字: {text_stage}, 時間: {time_stage})...")
-        output_dir = self.base_path / self.settings["srt_output"]
         ai_folder = self.base_path / self.settings["ai"]
+        self.generated_srt_files = []
         
         text_file = self.base_path / self.settings[f'txt_{text_stage}'] / f"{text_stage}-txt_{self.output_filename}.txt"
         time_file = self.base_path / self.settings[f'txt_{time_stage}'] / f"{time_stage}-time_{self.output_filename}.txt"
@@ -927,11 +934,12 @@ class ProcessWorker(QThread):
 
         merger = SRTMerger()
         
-        # 合併主要字幕
-        srt_out_file = output_dir / f"{self.output_filename}.srt"
+        # 合併主要字幕（先生成於 AI 交換資料夾，由 3C-1 決定輸出位置）
+        srt_out_file = ai_folder / f"{self.output_filename}.srt"
         success, msg = merger.merge_files(self.output_filename, str(text_file), str(time_file), str(srt_out_file))
         if not success: raise Exception(f"合併主要字幕失敗: {msg}")
-        shutil.copy2(srt_out_file, ai_folder / srt_out_file.name) # 複製到 AI 資料夾
+        self.generated_srt_files.append(srt_out_file)
+        self.log(f"3B: 已生成 SRT: {srt_out_file.name}")
 
         # 條件式生成 raw 版字幕（根據設定決定）
         if self.main_window.raw_subtitle_enabled:
@@ -940,12 +948,12 @@ class ProcessWorker(QThread):
             if raw_text_file.exists() and raw_time_file.exists():
                 # 使用自定義後綴
                 suffix = self.main_window.raw_subtitle_suffix if self.main_window.raw_subtitle_suffix else "_raw"
-                srt_raw_out_file = output_dir / f"{self.output_filename}{suffix}.srt"
+                srt_raw_out_file = ai_folder / f"{self.output_filename}{suffix}.srt"
                 success, msg = merger.merge_files(self.output_filename, str(raw_text_file), str(raw_time_file), str(srt_raw_out_file))
                 if not success:
                     self.log(f"警告: 合併原文raw字幕失敗: {msg}")
                 else:
-                    shutil.copy2(srt_raw_out_file, ai_folder / srt_raw_out_file.name) # 複製到 AI 資料夾
+                    self.generated_srt_files.append(srt_raw_out_file)
                     self.log(f"已生成原文字幕: {srt_raw_out_file.name}")
             else:
                 self.log("資訊: 找不到1B階段檔案，跳過生成原文raw字幕。")
@@ -958,7 +966,46 @@ class ProcessWorker(QThread):
             else: subprocess.call(['xdg-open', str(ai_folder)])
             self.ai_folder_opened = True
 
-        self.log(f"3B: SRT檔案生成並複製完成。")
+        self.log(f"3B: SRT檔案生成完成。")
+
+    def run_3C1_output(self):
+        """3C-1: 根據勾選狀態將生成的 SRT 輸出至來源檔資料夾及/或備份資料夾"""
+        self.progress_updated.emit(95, "執行 3C-1: 輸出SRT檔案資料夾...")
+        generated = getattr(self, 'generated_srt_files', [])
+        if not generated:
+            self.log("資訊: 3C-1 無已生成的 SRT 檔案，跳過輸出。")
+            return
+
+        output_source = self.main_window.srt_output_source_enabled
+        output_backup = self.main_window.srt_output_backup_enabled
+
+        if not output_source and not output_backup:
+            self.log(self.main_window.language_manager.get_text(
+                "srt_output_none_selected",
+                "警告: 3C-1 未選擇任何輸出資料夾，SRT僅保留於AI交換資料夾。"))
+            return
+
+        # 來源檔資料夾：與輸入檔案相同目錄
+        if output_source and self.input_file:
+            source_dir = Path(self.input_file).parent
+            source_dir.mkdir(parents=True, exist_ok=True)
+            for srt_file in generated:
+                dst = source_dir / srt_file.name
+                shutil.copy2(srt_file, dst)
+            self.log(self.main_window.language_manager.get_text(
+                "srt_output_source_done",
+                "已輸出SRT至來源檔資料夾: {path}").format(path=source_dir))
+
+        # 備份資料夾：系統設定 -> 路徑設定 -> SRT備份資料夾
+        if output_backup:
+            backup_dir = self.base_path / self.settings["srt_output"]
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            for srt_file in generated:
+                dst = backup_dir / srt_file.name
+                shutil.copy2(srt_file, dst)
+            self.log(self.main_window.language_manager.get_text(
+                "srt_output_backup_done",
+                "已輸出SRT至備份資料夾: {path}").format(path=backup_dir))
 
     def resume_process(self): self.is_paused = False
     def log(self, message): self.progress_updated.emit(-1, message)
@@ -1071,6 +1118,11 @@ class MainWindow(QMainWindow):
         self.raw_subtitle_enabled = raw_subtitle_config.get("enabled", True)
         self.raw_subtitle_suffix = raw_subtitle_config.get("suffix", "_raw")
         
+        # 新增：3C-1 輸出SRT檔案資料夾設定(來源檔資料夾/備份資料夾)
+        srt_output_config = self.settings.get("srt_output", {})
+        self.srt_output_source_enabled = srt_output_config.get("source_folder", False)
+        self.srt_output_backup_enabled = srt_output_config.get("backup_folder", True)
+        
         # 批次處理相關屬性
         self.batch_mode = False  # 是否為批次處理模式
         self.batch_files = []  # 待處理的檔案列表
@@ -1094,7 +1146,8 @@ class MainWindow(QMainWindow):
             "1D": self.language_manager.get_text("step_1d", "1D: 準備AI翻譯檔案"),
             "2C": self.language_manager.get_text("step_2c", "2C: AI自動翻譯或手動翻譯"),
             "3A": self.language_manager.get_text("step_3a", "3A: 標記文字還原"),
-            "3B": self.language_manager.get_text("step_3b", "3B: 生成SRT檔案 (翻譯+原文)")
+            "3B": self.language_manager.get_text("step_3b", "3B: 生成SRT檔案 (翻譯+原文)"),
+            "3C-1": self.language_manager.get_text("step_3c1", "3C-1: 輸出SRT檔案資料夾")
         }
 
     def setup_ui(self):
@@ -1372,6 +1425,26 @@ class MainWindow(QMainWindow):
                     hlayout.addWidget(self.raw_subtitle_suffix_input)
                     
                     self.workflow_preview_layout.addLayout(hlayout)
+                elif step_id == "3C-1":
+                    # 為 3C-1 步驟添加兩個輸出目標勾選框
+                    label = QLabel(desc)
+                    self.workflow_preview_layout.addWidget(label)
+
+                    srt_output_layout = QHBoxLayout()
+                    srt_output_layout.addSpacing(20)  # 縮排
+
+                    self.srt_output_source_checkbox = QCheckBox(self.language_manager.get_text("srt_output_source_folder", "來源檔資料夾"))
+                    self.srt_output_source_checkbox.setChecked(self.srt_output_source_enabled)
+                    self.srt_output_source_checkbox.stateChanged.connect(self.on_srt_output_source_changed)
+                    srt_output_layout.addWidget(self.srt_output_source_checkbox)
+
+                    self.srt_output_backup_checkbox = QCheckBox(self.language_manager.get_text("srt_output_backup_folder", "備份資料夾"))
+                    self.srt_output_backup_checkbox.setChecked(self.srt_output_backup_enabled)
+                    self.srt_output_backup_checkbox.stateChanged.connect(self.on_srt_output_backup_changed)
+                    srt_output_layout.addWidget(self.srt_output_backup_checkbox)
+
+                    srt_output_layout.addStretch()
+                    self.workflow_preview_layout.addLayout(srt_output_layout)
                 else:
                     self.workflow_preview_layout.addWidget(QLabel(desc))
 
@@ -1422,6 +1495,28 @@ class MainWindow(QMainWindow):
         # 保存設定
         self.settings.setdefault("raw_subtitle", {})
         self.settings["raw_subtitle"]["suffix"] = self.raw_subtitle_suffix
+        save_settings(self.settings)
+
+    def on_srt_output_source_changed(self, state):
+        """3C-1 來源檔資料夾輸出開關切換事件"""
+        self.srt_output_source_enabled = bool(state)
+        status_text = self.language_manager.get_text("enabled", "啟用") if self.srt_output_source_enabled else self.language_manager.get_text("disabled", "停用")
+        self.log_message(self.language_manager.get_text("srt_output_source_status", "來源檔資料夾輸出已{status}").format(status=status_text))
+        
+        # 保存設定
+        self.settings.setdefault("srt_output", {})
+        self.settings["srt_output"]["source_folder"] = self.srt_output_source_enabled
+        save_settings(self.settings)
+
+    def on_srt_output_backup_changed(self, state):
+        """3C-1 備份資料夾輸出開關切換事件"""
+        self.srt_output_backup_enabled = bool(state)
+        status_text = self.language_manager.get_text("enabled", "啟用") if self.srt_output_backup_enabled else self.language_manager.get_text("disabled", "停用")
+        self.log_message(self.language_manager.get_text("srt_output_backup_status", "備份資料夾輸出已{status}").format(status=status_text))
+        
+        # 保存設定
+        self.settings.setdefault("srt_output", {})
+        self.settings["srt_output"]["backup_folder"] = self.srt_output_backup_enabled
         save_settings(self.settings)
 
     def select_file(self):
