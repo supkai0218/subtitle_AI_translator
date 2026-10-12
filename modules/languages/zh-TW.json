@@ -427,5 +427,10 @@
   "select_capcut_draft": "選擇 CapCut 的 draft_content.json",
   "select_srt_folder": "選擇包含SRT檔案的資料夾",
   "api_key_custom_option": "✏️ 自訂 (Custom)",
-  "api_key_custom_placeholder": "輸入自訂API Key，將存入.env的MAIN_API_KEY變數"
+  "api_key_custom_placeholder": "輸入自訂API Key，將存入.env的MAIN_API_KEY變數",
+  "timeout_field": "Timeout(秒):",
+  "num_ctx_field": "Context大小(num_ctx): 0=ollama預設",
+  "num_ctx_tooltip": "0 = 使用 Ollama 端預設。僅對 Ollama /api/chat 端點生效",
+  "api_format_field": "API Format:",
+  "api_format_tooltip": "openai = OpenAI 相容端點；ollama = Ollama 原生 /api/chat（可帶 num_ctx）"
 }

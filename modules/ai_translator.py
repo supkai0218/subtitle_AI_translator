@@ -55,6 +55,11 @@ class AITranslator:
         self.retry_delay = config.get("retry_delay", 2)
         self.batch_failed_retry_count = config.get("batch_failed_retry_count", 3)
         self.max_concurrent_requests = config.get("max_concurrent_requests", 5)
+
+        # v0.89.14：API格式、timeout、context 長度（本機 Ollama 用）
+        self.api_format = config.get("api_format") or "openai"        # "openai" | "ollama"（null/空值一律視為 openai，避免 settings.json 舊值 null）
+        self.timeout_seconds = config.get("timeout_seconds") or 60    # 預設 60s，維持舊行為
+        self.num_ctx = config.get("num_ctx") or 0                     # 0 = 不指定（用 Ollama 端設定）
         
         # 偵測免費模型（OpenRouter 免費模型以 :free 結尾）
         self.is_free_model = self.model.endswith(":free")
@@ -307,14 +312,9 @@ class AITranslator:
             "X-Title": "Subtitle AI Translator"
         }
         
-        data = {
-            "model": self.model,
-            "messages": messages,
-            "max_tokens": max_tokens,
-            "temperature": 0.3
-        }
-        
-        timeout = aiohttp.ClientTimeout(total=60)
+        data = self._build_payload(messages, max_tokens)
+
+        timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
         
         # 免費模型 429 重試次數獨立設定
         max_429_retries = 5 if self.is_free_model else self.max_retries
@@ -348,12 +348,13 @@ class AITranslator:
                         
                         response.raise_for_status()
                         result = await response.json()
-                        
-                        if "choices" in result and len(result["choices"]) > 0:
-                            choice = result["choices"][0]
-                            return choice["message"]["content"]
-                        
-                        return None
+
+                        # v0.89.14：原生 API 錯誤格式為 {"error": "字串"}
+                        if "error" in result and self.api_format == "ollama":
+                            self.logger.error(f"Ollama API錯誤: {result['error']}")
+                            return None
+
+                        return self._extract_content(result)
                         
             except (aiohttp.ClientError, Exception) as e:
                 if attempt < max_429_retries and "429" in str(e):
@@ -436,19 +437,14 @@ class AITranslator:
             "X-Title": "Subtitle AI Translator"
         }
         
-        data = {
-            "model": self.model,
-            "messages": messages,
-            "max_tokens": max_tokens,
-            "temperature": 0.3
-        }
-        
+        data = self._build_payload(messages, max_tokens)
+
         # 免費模型 429 重試次數獨立設定（因為每次重試只是等待，成本很低）
         max_429_retries = 5 if self.is_free_model else self.max_retries
-        
+
         for attempt in range(max_429_retries + 1):
             try:
-                response = requests.post(self.api_url, headers=headers, json=data, timeout=60)
+                response = requests.post(self.api_url, headers=headers, json=data, timeout=self.timeout_seconds)
                 
                 # 處理429速率限制：等待後重試
                 if response.status_code == 429:
@@ -480,12 +476,13 @@ class AITranslator:
                 response.raise_for_status()
                 
                 result = response.json()
-                
-                if "choices" in result and len(result["choices"]) > 0:
-                    choice = result["choices"][0]
-                    return choice["message"]["content"]
-                
-                return None
+
+                # v0.89.14：原生 API 錯誤格式為 {"error": "字串"}
+                if "error" in result and self.api_format == "ollama":
+                    self.logger.error(f"Ollama API錯誤: {result['error']}")
+                    return None
+
+                return self._extract_content(result)
                 
             except requests.RequestException as e:
                 if attempt < max_429_retries and "429" in str(e):
@@ -498,6 +495,35 @@ class AITranslator:
         
         return None
     
+    def _build_payload(self, messages: List[Dict], max_tokens: int) -> Dict:
+        """v0.89.14：依 api_format 建構請求 body"""
+        data = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.3,
+        }
+        if self.api_format == "ollama":
+            options = {"num_predict": max_tokens}
+            if self.num_ctx > 0:
+                options["num_ctx"] = self.num_ctx
+            data["options"] = options
+            data["stream"] = False  # 原生 /api/chat 預設串流，必須關閉才能用 json() 解析
+        else:
+            data["max_tokens"] = max_tokens
+        return data
+
+    def _extract_content(self, result: Dict) -> Optional[str]:
+        """v0.89.14：依 api_format 解析回應內容"""
+        if self.api_format == "ollama":
+            msg = result.get("message")
+            if isinstance(msg, dict):
+                return msg.get("content")
+            return None
+        choices = result.get("choices")
+        if choices and len(choices) > 0:
+            return choices[0].get("message", {}).get("content")
+        return None
+
     def _replace_variables(self, template: str, variables: Dict[str, str]) -> str:
         """替換模板中的變數"""
         result = template

@@ -1,3 +1,4 @@
+#v0.89.14 新增 Ollama 原生 /api/chat 端點支援（provider 加顯式 api_format 欄位），timeout 與 num_ctx 做成 UI 變數（AI翻譯設定/Translation Parameters 與 系統設定/翻譯設定 兩處），num_ctx 備註 0=ollama預設，解決本機 Ollama 批次翻譯 60 秒 timeout 問題
 #v0.89.13 新增 3C-2 檔名後綴編輯流程，修正SRT來源模式輸出檔名衝突問題，放大視窗
 #v0.89.13a 新增 3C-1 輸出SRT檔案資料夾流程(來源檔資料夾/備份資料夾)，SRT輸出資料夾更名為SRT備份資料夾
 #v0.89.12 設定檔公私分離，偵測settings資料夾是否需要初始化
@@ -433,6 +434,19 @@ class SettingsDialog(QDialog):
         self.ai_inputs["batch_failed_retry_count"].setValue(ai_config.get("batch_failed_retry_count", 3))
         translate_layout.addRow(self._get_text("batch_failed_retry_count_label", "批次失敗重試次數:"), self.ai_inputs["batch_failed_retry_count"])
 
+        # v0.89.14：timeout、num_ctx（0 = 使用 Ollama 端預設，僅對 Ollama 原生端點生效）
+        self.ai_inputs["timeout_seconds"] = QSpinBox()
+        self.ai_inputs["timeout_seconds"].setRange(5, 3600)
+        self.ai_inputs["timeout_seconds"].setValue(ai_config.get("timeout_seconds", 60))
+        translate_layout.addRow(self._get_text("timeout_field", "Timeout(秒):"), self.ai_inputs["timeout_seconds"])
+
+        self.ai_inputs["num_ctx"] = QSpinBox()
+        self.ai_inputs["num_ctx"].setRange(0, 131072)
+        self.ai_inputs["num_ctx"].setSingleStep(512)
+        self.ai_inputs["num_ctx"].setValue(ai_config.get("num_ctx", 0))
+        self.ai_inputs["num_ctx"].setToolTip(self._get_text("num_ctx_tooltip", "0 = 使用 Ollama 端預設。僅對 Ollama /api/chat 端點生效"))
+        translate_layout.addRow(self._get_text("num_ctx_field", "Context大小(num_ctx): 0=ollama預設"), self.ai_inputs["num_ctx"])
+
         form_layout.addRow("", translate_group)
         
         # Prompt設定
@@ -601,6 +615,8 @@ class SettingsDialog(QDialog):
         self.ai_inputs["max_retries"].setValue(ai_defaults["max_retries"])
         self.ai_inputs["retry_delay"].setValue(ai_defaults["retry_delay"])
         self.ai_inputs["batch_failed_retry_count"].setValue(ai_defaults["batch_failed_retry_count"])
+        self.ai_inputs["timeout_seconds"].setValue(ai_defaults.get("timeout_seconds", 60))  # v0.89.14
+        self.ai_inputs["num_ctx"].setValue(ai_defaults.get("num_ctx", 0))  # v0.89.14
 
         # 恢復Prompt設定預設值
         prompt_defaults = ai_defaults["prompts"]
@@ -627,6 +643,9 @@ class SettingsDialog(QDialog):
         # 保存AI翻譯設定
         new_settings["ai_translation"]["api_provider"] = self.ai_inputs["api_provider"].currentText()
         new_settings["ai_translation"]["api_url"] = self.ai_inputs["api_url"].text().strip()
+        # v0.89.14：api_format 由 URL 自動判斷（/api/chat → ollama，其餘 → openai），避免 settings.json 出現 null
+        api_url_val = self.ai_inputs["api_url"].text().strip()
+        new_settings["ai_translation"]["api_format"] = "ollama" if "/api/chat" in api_url_val else "openai"
 
         # API Key: 從下拉選單或自訂輸入取得，以env變數形式儲存
         api_key_var = self.ai_inputs["api_key_combo"].currentData()
@@ -649,6 +668,8 @@ class SettingsDialog(QDialog):
         new_settings["ai_translation"]["max_retries"] = self.ai_inputs["max_retries"].value()
         new_settings["ai_translation"]["retry_delay"] = self.ai_inputs["retry_delay"].value()
         new_settings["ai_translation"]["batch_failed_retry_count"] = self.ai_inputs["batch_failed_retry_count"].value()
+        new_settings["ai_translation"]["timeout_seconds"] = self.ai_inputs["timeout_seconds"].value()  # v0.89.14
+        new_settings["ai_translation"]["num_ctx"] = self.ai_inputs["num_ctx"].value()  # v0.89.14
 
         # 保存Prompt設定
         new_settings["ai_translation"]["prompts"]["system_prompt"] = self.ai_inputs["system_prompt"].toPlainText().strip()

@@ -326,5 +326,10 @@
   "select_capcut_draft": "Select CapCut draft_content.json",
   "select_srt_folder": "Select folder containing SRT files",
   "api_key_custom_option": "✏️ Custom",
-  "api_key_custom_placeholder": "Enter custom API Key, will be saved to MAIN_API_KEY in .env"
+  "api_key_custom_placeholder": "Enter custom API Key, will be saved to MAIN_API_KEY in .env",
+  "timeout_field": "Timeout (seconds):",
+  "num_ctx_field": "Context Size (num_ctx): 0=ollama default",
+  "num_ctx_tooltip": "0 = use Ollama server default. Only effective for Ollama /api/chat endpoints",
+  "api_format_field": "API Format:",
+  "api_format_tooltip": "openai = OpenAI-compatible endpoint; ollama = Ollama native /api/chat (supports num_ctx)"
 }

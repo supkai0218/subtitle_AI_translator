@@ -709,6 +709,13 @@ class AITranslationEditorDialog(QDialog):
         api_layout.addWidget(QLabel(self.language_manager.get_text("api_key_field", "API Key:")))
         api_layout.addWidget(self.api_key_edit)
 
+        # v0.89.14：API格式（openai = OpenAI 相容端點；ollama = 本機 Ollama 原生 /api/chat）
+        self.api_format_combo = QComboBox()
+        self.api_format_combo.addItems(["openai", "ollama"])
+        self.api_format_combo.setToolTip(self.language_manager.get_text("api_format_tooltip", "openai = OpenAI 相容端點；ollama = Ollama 原生 /api/chat（可帶 num_ctx）"))
+        api_layout.addWidget(QLabel(self.language_manager.get_text("api_format_field", "API Format:")))
+        api_layout.addWidget(self.api_format_combo)
+
         settings_selection_layout.addWidget(api_group)
 
         # 模型設定選擇
@@ -772,7 +779,21 @@ class AITranslationEditorDialog(QDialog):
 
         self.retry_delay_spinbox = QSpinBox()
         self.retry_delay_spinbox.setRange(1, 10)
+        self.retry_delay_spinbox.setValue(4)
         model_params_layout.addRow(self.language_manager.get_text("retry_delay_field", "Retry Delay (seconds):"), self.retry_delay_spinbox)
+
+        # v0.89.14：timeout、num_ctx（0 = 使用 Ollama 端預設，僅對 Ollama 原生端點生效）
+        self.timeout_spinbox = QSpinBox()
+        self.timeout_spinbox.setRange(5, 3600)
+        self.timeout_spinbox.setValue(60)
+        model_params_layout.addRow(self.language_manager.get_text("timeout_field", "Timeout(秒):"), self.timeout_spinbox)
+
+        self.num_ctx_spinbox = QSpinBox()
+        self.num_ctx_spinbox.setRange(0, 131072)
+        self.num_ctx_spinbox.setSingleStep(512)
+        self.num_ctx_spinbox.setValue(0)
+        self.num_ctx_spinbox.setToolTip(self.language_manager.get_text("num_ctx_tooltip", "0 = 使用 Ollama 端預設。僅對 Ollama /api/chat 端點生效"))
+        model_params_layout.addRow(self.language_manager.get_text("num_ctx_field", "Context大小(num_ctx):"), self.num_ctx_spinbox)
 
         self.batch_failed_retry_count_spinbox = QSpinBox()
         self.batch_failed_retry_count_spinbox.setRange(0, 10)
@@ -911,19 +932,22 @@ class AITranslationEditorDialog(QDialog):
                 "enabled": self.enabled_checkbox.isChecked(),
                 "api_provider": self.api_provider_edit.text().strip(),
                 "api_url": self.api_url_edit.text().strip(),
+                "api_format": self.api_format_combo.currentText(),  # v0.89.14
                 "model": self.model_edit.text().strip(),
                 "source_language": self.source_language_edit.text().strip(),
                 "target_language": self.target_language_edit.text().strip(),
                 "batch_size": self.batch_size_spinbox.value(),
-                "max_concurrent_requests": self.max_concurrent_requests_spinbox.value(),
-                "enable_validation": self.enable_validation_checkbox.isChecked(),
-                "max_retries": self.max_retries_spinbox.value(),
-                "retry_delay": self.retry_delay_spinbox.value(),
-                "batch_failed_retry_count": self.batch_failed_retry_count_spinbox.value(),
-                "empty_threshold": self.empty_threshold_spinbox.value() / 100.0,  # v2: 百分比轉小數
-            })
+                                "max_concurrent_requests": self.max_concurrent_requests_spinbox.value(),
+                            "timeout_seconds": self.timeout_spinbox.value(),
+                                "num_ctx": self.num_ctx_spinbox.value(),
+                                "enable_validation": self.enable_validation_checkbox.isChecked(),
+                                "max_retries": self.max_retries_spinbox.value(),
+                                "retry_delay": self.retry_delay_spinbox.value(),
+                                "batch_failed_retry_count": self.batch_failed_retry_count_spinbox.value(),
+                                "empty_threshold": self.empty_threshold_spinbox.value() / 100.0,  # v2: 百分比轉小數
+                            })
             
-            # 更新API金鑰（如果不是遮蔽的）
+                            # 更新API金鑰（如果不是遮蔽的）
             api_key_text = self.api_key_edit.text().strip()
             if not api_key_text.startswith('*'):
                 self.ai_config["api_key"] = api_key_text
@@ -962,6 +986,8 @@ class AITranslationEditorDialog(QDialog):
             self.retry_delay_spinbox.setValue(2)
             self.batch_failed_retry_count_spinbox.setValue(3)
             self.empty_threshold_spinbox.setValue(1)  # v2: 預設 1%
+            self.timeout_spinbox.setValue(60)
+            self.num_ctx_spinbox.setValue(0)
 
             # 重置Prompt設定
             self.translation_style_edit.clear()
@@ -1335,6 +1361,11 @@ class AITranslationEditorDialog(QDialog):
             model_data = ai_config_data.get("api_settings", {}).get(api_name, {}).get("models", {}).get(model_name, {})
             translation_config = model_data.get("translation_config", {})
 
+            # v0.89.14：同步 provider 層的 API 格式到 UI
+            api_fmt = ai_config_data.get("api_settings", {}).get(api_name, {}).get("api_format", "openai")
+            fmt_idx = self.api_format_combo.findText(api_fmt)
+            self.api_format_combo.setCurrentIndex(fmt_idx if fmt_idx >= 0 else 0)
+
             # 如果模型沒有翻譯參數，使用預設值
             if not translation_config:
                 translation_config = ai_config_data.get("default_translation_config", {})
@@ -1344,6 +1375,8 @@ class AITranslationEditorDialog(QDialog):
             self.target_language_edit.setText(translation_config.get("target_language", "zh-TW"))
             self.batch_size_spinbox.setValue(translation_config.get("batch_size", 100))
             self.max_concurrent_requests_spinbox.setValue(translation_config.get("max_concurrent_requests", 2))
+            self.timeout_spinbox.setValue(translation_config.get("timeout_seconds", 60))
+            self.num_ctx_spinbox.setValue(translation_config.get("num_ctx", 0))
             self.enable_validation_checkbox.setChecked(translation_config.get("enable_validation", True))
             self.max_retries_spinbox.setValue(translation_config.get("max_retries", 3))
             self.retry_delay_spinbox.setValue(translation_config.get("retry_delay", 4))
@@ -1362,6 +1395,8 @@ class AITranslationEditorDialog(QDialog):
         self.target_language_edit.clear()
         self.batch_size_spinbox.setValue(100)
         self.max_concurrent_requests_spinbox.setValue(2)
+        self.timeout_spinbox.setValue(60)
+        self.num_ctx_spinbox.setValue(0)
         self.enable_validation_checkbox.setChecked(True)
         self.max_retries_spinbox.setValue(3)
         self.retry_delay_spinbox.setValue(4)
@@ -1382,7 +1417,8 @@ class AITranslationEditorDialog(QDialog):
                 self.ai_config.update({
                     "api_provider": api_data.get("provider", ""),
                     "api_url": api_data.get("url", ""),
-                    "api_key": substitute_env_vars(api_data.get("key", ""))
+                    "api_key": substitute_env_vars(api_data.get("key", "")),
+                    "api_format": api_data.get("api_format", "openai")  # v0.89.14
                 })
 
             # 同步模型設定（從當前API的models中讀取）
@@ -1396,15 +1432,17 @@ class AITranslationEditorDialog(QDialog):
                 "source_language": self.source_language_edit.text().strip(),
                 "target_language": self.target_language_edit.text().strip(),
                 "batch_size": self.batch_size_spinbox.value(),
-                "max_concurrent_requests": self.max_concurrent_requests_spinbox.value(),
-                "enable_validation": self.enable_validation_checkbox.isChecked(),
-                "max_retries": self.max_retries_spinbox.value(),
-                "retry_delay": self.retry_delay_spinbox.value(),
-                "batch_failed_retry_count": self.batch_failed_retry_count_spinbox.value(),
-                "empty_threshold": self.empty_threshold_spinbox.value() / 100.0,  # v2: 百分比轉小數
-            })
+                                "max_concurrent_requests": self.max_concurrent_requests_spinbox.value(),
+                            "timeout_seconds": self.timeout_spinbox.value(),
+                                "num_ctx": self.num_ctx_spinbox.value(),
+                                "enable_validation": self.enable_validation_checkbox.isChecked(),
+                                "max_retries": self.max_retries_spinbox.value(),
+                                "retry_delay": self.retry_delay_spinbox.value(),
+                                "batch_failed_retry_count": self.batch_failed_retry_count_spinbox.value(),
+                                "empty_threshold": self.empty_threshold_spinbox.value() / 100.0,  # v2: 百分比轉小數
+                            })
 
-            # 重新初始化翻譯器
+                            # 重新初始化翻譯器
             if self.ai_config.get("enabled", False):
                 self.ai_translator = AITranslator(self.ai_config)
 
@@ -1430,7 +1468,8 @@ class AITranslationEditorDialog(QDialog):
                 ai_config_data["api_settings"][current_api].update({
                     "provider": self.api_provider_edit.text().strip(),
                     "url": self.api_url_edit.text().strip(),
-                    "key": self.api_key_edit.text().strip()
+                    "key": self.api_key_edit.text().strip(),
+                    "api_format": self.api_format_combo.currentText() if hasattr(self, "api_format_combo") else "openai"
                 })
 
                 # 確保models結構存在於該API下
@@ -1504,11 +1543,14 @@ class AITranslationEditorDialog(QDialog):
             settings_data["ai_translation"]["api_provider"] = api_data.get("provider", "")
             settings_data["ai_translation"]["api_url"] = api_data.get("url", "")
             settings_data["ai_translation"]["api_key"] = api_data.get("key", "")
+            settings_data["ai_translation"]["api_format"] = api_data.get("api_format", "openai")  # v0.89.14
             settings_data["ai_translation"]["model"] = model_data.get("model", "")
             settings_data["ai_translation"]["source_language"] = self.source_language_edit.text().strip()
             settings_data["ai_translation"]["target_language"] = self.target_language_edit.text().strip()
             settings_data["ai_translation"]["batch_size"] = self.batch_size_spinbox.value()
             settings_data["ai_translation"]["max_concurrent_requests"] = self.max_concurrent_requests_spinbox.value()
+            settings_data["ai_translation"]["timeout_seconds"] = self.timeout_spinbox.value()  # v0.89.14
+            settings_data["ai_translation"]["num_ctx"] = self.num_ctx_spinbox.value()  # v0.89.14
             settings_data["ai_translation"]["enable_validation"] = self.enable_validation_checkbox.isChecked()
             settings_data["ai_translation"]["max_retries"] = self.max_retries_spinbox.value()
             settings_data["ai_translation"]["retry_delay"] = self.retry_delay_spinbox.value()
@@ -1562,6 +1604,10 @@ class AITranslationEditorDialog(QDialog):
             self.api_provider_edit.setText(api_data.get("provider", ""))
             self.api_url_edit.setText(api_data.get("url", ""))
             self.api_key_edit.setText(api_data.get("key", ""))
+            # v0.89.14：載入 API 格式
+            fmt = api_data.get("api_format", "openai")
+            idx = self.api_format_combo.findText(fmt)
+            self.api_format_combo.setCurrentIndex(idx if idx >= 0 else 0)
 
             # 根據新選擇的API載入對應的模型
             self._load_models_for_api(current_api)
@@ -1597,6 +1643,8 @@ class AITranslationEditorDialog(QDialog):
                 "target_language": self.target_language_edit.text().strip(),
                 "batch_size": self.batch_size_spinbox.value(),
                 "max_concurrent_requests": self.max_concurrent_requests_spinbox.value(),
+                "timeout_seconds": self.timeout_spinbox.value(),
+                "num_ctx": self.num_ctx_spinbox.value(),
                 "enable_validation": self.enable_validation_checkbox.isChecked(),
                 "max_retries": self.max_retries_spinbox.value(),
                 "retry_delay": self.retry_delay_spinbox.value(),
