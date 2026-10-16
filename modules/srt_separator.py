@@ -69,7 +69,10 @@ class SrtSeparator:
         # 儲存字幕文字檔
         with open(subtitle_path, 'w', encoding='utf-8') as f:
             for idx in sorted(subtitle_dict.keys()):
-                f.write(f"{idx}:{subtitle_dict[idx]}\n")
+                # 中間 TXT 格式以一行對應一個時間碼；SRT 同一字幕可有多行文字。
+                # 將字幕內換行合併，避免後續把續行誤算成額外字幕。
+                text = " ".join(part.strip() for part in subtitle_dict[idx].splitlines() if part.strip())
+                f.write(f"{idx}:{text}\n")
         
         # 儲存時間軸檔
         with open(timecode_path, 'w', encoding='utf-8') as f:

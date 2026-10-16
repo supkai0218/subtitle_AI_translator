@@ -1,3 +1,4 @@
+#v0.89.15 修正 SRT 單筆多行字幕造成翻譯 TXT 行數膨脹與尾端空白；一鍵翻譯驗證失敗時重試，耗盡次數後停止寫檔
 #v0.89.14 新增 Ollama 原生 /api/chat 端點支援（provider 加顯式 api_format 欄位），timeout 與 num_ctx 做成 UI 變數（AI翻譯設定/Translation Parameters 與 系統設定/翻譯設定 兩處），num_ctx 備註 0=ollama預設，解決本機 Ollama 批次翻譯 60 秒 timeout 問題
 #v0.89.13 新增 3C-2 檔名後綴編輯流程，修正SRT來源模式輸出檔名衝突問題，放大視窗
 #v0.89.13a 新增 3C-1 輸出SRT檔案資料夾流程(來源檔資料夾/備份資料夾)，SRT輸出資料夾更名為SRT備份資料夾
@@ -903,22 +904,25 @@ class ProcessWorker(QThread):
         def progress_callback(msg):
              self.progress_updated.emit(60, f"2C AI翻譯中: {msg}")
         
-        success, response, error_msg = translator.translate_batch(lines, progress_callback=progress_callback)
-        
-        if not success:
-            raise Exception(f"AI 翻譯失敗: {error_msg}")
-            
-        # --- v2驗證：區分重翻時機 ---
-        self.log("正在驗證並清理翻譯結果...")
         validator = TranslationValidator(ai_config)
         empty_threshold = ai_config.get("empty_threshold", 0.01)  # v2: 空白翻譯閾值，預設1%
-        validation_status, repaired_result, validation_msg = validator.validate_response(response, len(lines), empty_threshold)
+        max_retries = max(0, int(ai_config.get("max_retries", 3)))
+        for attempt in range(max_retries + 1):
+            success, response, error_msg = translator.translate_batch(lines, progress_callback=progress_callback)
+            if not success:
+                raise Exception(f"AI 翻譯失敗: {error_msg}")
 
-        # 只在需要重翻時才發出警告（FIXABLE 已自動修復）
-        if validation_status == ValidationStatus.RETRY_NEEDED:
-            self.log(f"警告: 需要重新翻譯: {validation_msg}")
-        elif validation_status in (ValidationStatus.ACCEPTABLE, ValidationStatus.FIXABLE):
-            self.log(f"提示: {validation_msg}")
+            self.log("正在驗證並清理翻譯結果...")
+            validation_status, repaired_result, validation_msg = validator.validate_response(response, len(lines), empty_threshold)
+            if validation_status != ValidationStatus.RETRY_NEEDED:
+                if validation_status in (ValidationStatus.ACCEPTABLE, ValidationStatus.FIXABLE):
+                    self.log(f"提示: {validation_msg}")
+                break
+
+            if attempt == max_retries:
+                raise Exception(f"AI 翻譯驗證失敗（已重試 {max_retries} 次）: {validation_msg}")
+            self.log(f"警告: 需要重新翻譯（重試 {attempt + 1}/{max_retries}）: {validation_msg}")
+            self.msleep(int(max(0, float(ai_config.get("retry_delay", 2))) * 1000))
         
         # 將 repaired_result (List[str]) 轉換回文字內容
         # 【修正】保留序號格式 "序號:內容"，因為後續的3A步驟需要這個格式
